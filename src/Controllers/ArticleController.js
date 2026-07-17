@@ -1442,12 +1442,26 @@ const addSliderOrder = async (req, res) => {
       });
     }
 
-    const count = await Article.countDocuments({
-      slider: true,
+    if (article.slider) {
+      return res.status(400).json({
+        success: false,
+        message: "Already in slider",
+      });
+    }
+
+    const sliders = await Article.find({ slider: true }).sort({
+      sliderOrder: 1,
     });
 
+    if (sliders.length >= 4) {
+      return res.status(400).json({
+        success: false,
+        message: "Maximum 4 slider articles allowed",
+      });
+    }
+
     article.slider = true;
-    article.sliderOrder = count + 1;
+    article.sliderOrder = sliders.length + 1;
 
     await article.save();
 
@@ -1455,12 +1469,10 @@ const addSliderOrder = async (req, res) => {
       success: true,
       data: article,
     });
-  } catch (e) {
-    console.log(e);
-
+  } catch (err) {
     return res.status(500).json({
       success: false,
-      message: e.message,
+      message: err.message,
     });
   }
 };
@@ -1469,11 +1481,21 @@ const getSliderArticles = async (req, res) => {
     const articles = await Article.find({
       slider: true,
       status: "online",
-    }).sort({ sliderOrder: 1 });
+    })
+      .select(
+        "_id title image slug sliderOrder topic publishAt priority fixedPosition"
+      )
+      .sort({
+        sliderOrder: 1,
+      })
+      .lean();
 
-    res.json(articles);
+    return res.json({
+      success: true,
+      data: articles,
+    });
   } catch (err) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: err.message,
     });
@@ -1485,48 +1507,58 @@ const updateSliderOrder = async (req, res) => {
 
     if (!Array.isArray(articles)) {
       return res.status(400).json({
-        message: "Invalid payload"
+        success: false,
+        message: "Invalid payload",
       });
     }
 
-    const bulkOps = articles.map((item) => ({
-      updateOne: {
-        filter: { _id: item.id },
-        update: {
-          $set: {
-            sliderOrder: item.sliderOrder
-          }
-        }
-      }
-    }));
+    for (const item of articles) {
+      await Article.findByIdAndUpdate(item.id, {
+        sliderOrder: item.sliderOrder,
+      });
+    }
 
-    await Article.bulkWrite(bulkOps);
-
-    res.json({
+    return res.json({
       success: true,
-      message: "Slider updated successfully"
+      message: "Slider updated",
     });
-
   } catch (err) {
-    console.log(err);
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: err.message
+      message: err.message,
     });
   }
 };
 const removeSlider = async (req, res) => {
-  const { id } = req.body;
+  try {
+    const { id } = req.body;
 
-  await Article.findByIdAndUpdate(id, {
-    slider: false,
-    sliderOrder: null,
-  });
+    await Article.findByIdAndUpdate(id, {
+      slider: false,
+      sliderOrder: null,
+    });
 
-  res.json({
-    success: true,
-  });
+    const sliders = await Article.find({
+      slider: true,
+    }).sort({
+      sliderOrder: 1,
+    });
+
+    for (let i = 0; i < sliders.length; i++) {
+      sliders[i].sliderOrder = i + 1;
+      await sliders[i].save();
+    }
+
+    return res.json({
+      success: true,
+      message: "Removed Successfully",
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };
 
 export {
@@ -1536,6 +1568,7 @@ export {
   getFixedPositionArticles,
   updateSliderOrder,
   addSliderOrder,
+  removeSlider,
   getSliderArticles,
   getArticle,
   adminGetArticle,

@@ -39,6 +39,7 @@ import {
   getSliderArticles,
   updateSliderOrder,
   addSliderOrder,
+  removeSlider,
   getSubCategory,
   imageUpload,
   setFixedPosition,
@@ -134,6 +135,7 @@ route.route("/article/fixed").get(getFixedPositionArticles);
 route.route("/article/slider").get(getSliderArticles);
 route.route("/article/slider/order").put(updateSliderOrder);
 route.route("/article/add-slider").put(addSliderOrder);
+route.route("/article/remove-slider").put(removeSlider);;
 
 route.route("/article").get(getArticle).delete(DeleteArticle);
 route.route("/article/:id").put(approvedArticle).post(PostArticle);
