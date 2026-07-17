@@ -98,6 +98,11 @@ const ArticleSchema = mongoose.Schema(
       default: false,
       index: true
     },
+    sliderOrder: {
+      type: Number,
+      default: null,
+      index: true
+    },
     publishAt: { 
       type: Date, 
       default: Date.now,
@@ -131,6 +136,9 @@ ArticleSchema.index({ newsType: 1, status: 1, createdAt: -1 });
 ArticleSchema.index({ topic: 1, createdAt: -1 });
 ArticleSchema.index({ priority: 1, createdAt: -1 });
 ArticleSchema.index({ slider: 1, createdAt: -1 });
+
+ArticleSchema.index({ sliderOrder: 1 });
+ArticleSchema.index({ slider: 1, sliderOrder: 1 });
 
 // Create compound indexes for better query performance
 ArticleSchema.index({ approved: 1, status: 1 });

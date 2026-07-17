@@ -1429,36 +1429,54 @@ const getFixedPositionArticles = async (req, res) => {
   }
 };
 
-const addSliderOrder = async (req,res)=>{
+const addSliderOrder = async (req, res) => {
+  try {
+    const { id } = req.body;
 
-   const {id}=req.body;
+    const article = await Article.findById(id);
 
-   const last=await Article.findOne({
-      sliderOrder:{$ne:null}
-   }).sort({sliderOrder:-1});
+    if (!article) {
+      return res.status(404).json({
+        success: false,
+        message: "Article not found",
+      });
+    }
 
-   const next=last ? last.sliderOrder+1 : 1;
+    const count = await Article.countDocuments({
+      slider: true,
+    });
 
-   await Article.findByIdAndUpdate(id,{
-      sliderOrder:next
-   });
+    article.slider = true;
+    article.sliderOrder = count + 1;
 
-   res.json({
-      success:true
-   });
+    await article.save();
 
-}
+    return res.json({
+      success: true,
+      data: article,
+    });
+  } catch (e) {
+    console.log(e);
+
+    return res.status(500).json({
+      success: false,
+      message: e.message,
+    });
+  }
+};
 const getSliderArticles = async (req, res) => {
   try {
     const articles = await Article.find({
-      sliderOrder: { $ne: null },
+      slider: true,
       status: "online",
-    })
-      .sort({ sliderOrder: 1 });
+    }).sort({ sliderOrder: 1 });
 
     res.json(articles);
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 const updateSliderOrder = async (req, res) => {
@@ -1497,6 +1515,18 @@ const updateSliderOrder = async (req, res) => {
       message: err.message
     });
   }
+};
+const removeSlider = async (req, res) => {
+  const { id } = req.body;
+
+  await Article.findByIdAndUpdate(id, {
+    slider: false,
+    sliderOrder: null,
+  });
+
+  res.json({
+    success: true,
+  });
 };
 
 export {

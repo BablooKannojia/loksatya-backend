@@ -124,11 +124,8 @@ route.route("/role").put(changeRole);
 route.route("/change-user-password").put(changePassword);
 route.route("/register").put(changeRegister);
 route.route("/user").get(getUser).delete(DeleteUser);
-route.route("/article").get(getArticle).delete(DeleteArticle);
-route.route("/article/:id").put(approvedArticle).post(PostArticle);
 // Add share url
 route.route("/shareUrl").get(shareUrl);
-
 
 // Slider Fix Babloo 
 route.route("/article/fixed/clear").put(clearFixedPosition);
@@ -137,6 +134,9 @@ route.route("/article/fixed").get(getFixedPositionArticles);
 route.route("/article/slider").get(getSliderArticles);
 route.route("/article/slider/order").put(updateSliderOrder);
 route.route("/article/add-slider").put(addSliderOrder);
+
+route.route("/article").get(getArticle).delete(DeleteArticle);
+route.route("/article/:id").put(approvedArticle).post(PostArticle);
 
 route.route("/story").post(createStory);
 route.route("/story").get(getAllStories).delete(DeleteStory);
