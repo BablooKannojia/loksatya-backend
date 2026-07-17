@@ -1433,6 +1433,13 @@ const addSliderOrder = async (req, res) => {
   try {
     const { id } = req.body;
 
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Article id is required",
+      });
+    }
+
     const article = await Article.findById(id);
 
     if (!article) {
@@ -1442,34 +1449,66 @@ const addSliderOrder = async (req, res) => {
       });
     }
 
-    if (article.slider) {
+    // Already assigned
+    if (article.sliderOrder !== null && article.sliderOrder !== undefined) {
       return res.status(400).json({
         success: false,
-        message: "Already in slider",
+        message: "Article already assigned a slider position",
       });
     }
 
-    const sliders = await Article.find({ slider: true }).sort({
-      sliderOrder: 1,
+    // Count only sliderOrder articles
+    const total = await Article.countDocuments({
+      sliderOrder: { $ne: null },
     });
 
-    if (sliders.length >= 4) {
+    console.log("TOTAL:", total);
+
+    if (total >= 4) {
       return res.status(400).json({
         success: false,
         message: "Maximum 4 slider articles allowed",
       });
     }
 
-    article.slider = true;
-    article.sliderOrder = sliders.length + 1;
+    // Update article
+    const updatedArticle = await Article.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          slider: true,
+          sliderOrder: total + 1,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
 
-    await article.save();
+    console.log("UPDATED:", updatedArticle);
+
+    // Verify DB
+    const check = await Article.findById(id).lean();
+
+    console.log("DB CHECK:", check);
+
+    const docs = await Article.find({
+      sliderOrder: { $ne: null },
+    })
+      .select("_id title slider sliderOrder")
+      .sort({ sliderOrder: 1 })
+      .lean();
+
+    console.log("ALL SLIDERS:", docs);
 
     return res.json({
       success: true,
-      data: article,
+      data: updatedArticle,
     });
   } catch (err) {
+    console.log(err);
+
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -1479,7 +1518,7 @@ const addSliderOrder = async (req, res) => {
 const getSliderArticles = async (req, res) => {
   try {
     const articles = await Article.find({
-      slider: true,
+      sliderOrder: { $ne: null },
       status: "online",
     })
       .select(
@@ -1534,7 +1573,6 @@ const removeSlider = async (req, res) => {
     const { id } = req.body;
 
     await Article.findByIdAndUpdate(id, {
-      slider: false,
       sliderOrder: null,
     });
 
