@@ -1449,20 +1449,32 @@ const addSliderOrder = async (req, res) => {
       });
     }
 
-    // Already assigned
-    if (article.sliderOrder !== null && article.sliderOrder !== undefined) {
+    // Already assigned check
+    if (
+      article.sliderOrder !== null &&
+      article.sliderOrder !== undefined &&
+      typeof article.sliderOrder === "number"
+    ) {
       return res.status(400).json({
         success: false,
         message: "Article already assigned a slider position",
       });
     }
 
-    // Count only sliderOrder articles
+    // ✅ FIX: max nikalo, count nahi
+    const maxResult = await Article.aggregate([
+      { $match: { sliderOrder: { $type: "number" } } }, // sirf numeric values
+      { $group: { _id: null, max: { $max: "$sliderOrder" } } },
+    ]);
+
+    const currentMax = maxResult.length > 0 ? maxResult[0].max : 0;
+
+    // Total kitne slider mein hain wo bhi count karlo limit ke liye
     const total = await Article.countDocuments({
-      sliderOrder: { $ne: null },
+      sliderOrder: { $type: "number" },
     });
 
-    console.log("TOTAL:", total);
+    console.log("CURRENT MAX:", currentMax, "TOTAL:", total);
 
     if (total >= 4) {
       return res.status(400).json({
@@ -1471,36 +1483,18 @@ const addSliderOrder = async (req, res) => {
       });
     }
 
-    // Update article
+    const nextOrder = currentMax + 1;
+
     const updatedArticle = await Article.findByIdAndUpdate(
       id,
       {
         $set: {
           slider: true,
-          sliderOrder: total + 1,
+          sliderOrder: nextOrder,
         },
       },
-      {
-        new: true,
-        runValidators: true,
-      }
+      { new: true, runValidators: true }
     );
-
-    console.log("UPDATED:", updatedArticle);
-
-    // Verify DB
-    const check = await Article.findById(id).lean();
-
-    console.log("DB CHECK:", check);
-
-    const docs = await Article.find({
-      sliderOrder: { $ne: null },
-    })
-      .select("_id title slider sliderOrder")
-      .sort({ sliderOrder: 1 })
-      .lean();
-
-    console.log("ALL SLIDERS:", docs);
 
     return res.json({
       success: true,
@@ -1508,7 +1502,6 @@ const addSliderOrder = async (req, res) => {
     });
   } catch (err) {
     console.log(err);
-
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -1518,50 +1511,111 @@ const addSliderOrder = async (req, res) => {
 const getSliderArticles = async (req, res) => {
   try {
     const articles = await Article.find({
-      sliderOrder: { $ne: null },
+      sliderOrder: { $type: "number" },
       status: "online",
     })
-      .select(
-        "_id title image slug sliderOrder topic publishAt priority fixedPosition"
-      )
-      .sort({
-        sliderOrder: 1,
-      })
+      .select("_id title image slug sliderOrder topic publishAt priority")
+      .sort({ sliderOrder: 1 })
       .lean();
 
-    return res.json({
-      success: true,
-      data: articles,
-    });
+    return res.json({ success: true, data: articles });
   } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
 const updateSliderOrder = async (req, res) => {
   try {
-    const { articles } = req.body;
+    const { id, sliderOrder } = req.body;
 
-    if (!Array.isArray(articles)) {
+    if (!id || !sliderOrder) {
       return res.status(400).json({
         success: false,
-        message: "Invalid payload",
+        message: "id and sliderOrder are required",
       });
     }
 
-    for (const item of articles) {
-      await Article.findByIdAndUpdate(item.id, {
-        sliderOrder: item.sliderOrder,
+    if (sliderOrder < 1 || sliderOrder > 4) {
+      return res.status(400).json({
+        success: false,
+        message: "sliderOrder must be between 1 and 4",
       });
     }
+
+    const current = await Article.findById(id);
+
+    if (!current) {
+      return res.status(404).json({
+        success: false,
+        message: "Article not found",
+      });
+    }
+
+    if (current.sliderOrder == null) {
+      return res.status(400).json({
+        success: false,
+        message: "Article is not in slider",
+      });
+    }
+
+    const oldOrder = current.sliderOrder;
+
+    if (oldOrder === sliderOrder) {
+      return res.json({
+        success: true,
+        message: "No changes",
+      });
+    }
+
+    // Move Down
+    if (oldOrder < sliderOrder) {
+      await Article.updateMany(
+        {
+          sliderOrder: {
+            $gt: oldOrder,
+            $lte: sliderOrder,
+          },
+        },
+        {
+          $inc: {
+            sliderOrder: -1,
+          },
+        }
+      );
+    }
+
+    // Move Up
+    else {
+      await Article.updateMany(
+        {
+          sliderOrder: {
+            $gte: sliderOrder,
+            $lt: oldOrder,
+          },
+        },
+        {
+          $inc: {
+            sliderOrder: 1,
+          },
+        }
+      );
+    }
+
+    current.sliderOrder = sliderOrder;
+    await current.save();
+
+    const data = await Article.find({
+      sliderOrder: { $type: "number" },
+    })
+      .select("_id title sliderOrder")
+      .sort({ sliderOrder: 1 });
 
     return res.json({
       success: true,
-      message: "Slider updated",
+      data,
     });
   } catch (err) {
+    console.log(err);
+
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -1573,14 +1627,13 @@ const removeSlider = async (req, res) => {
     const { id } = req.body;
 
     await Article.findByIdAndUpdate(id, {
-      sliderOrder: null,
+      $unset: { sliderOrder: "" },
+      $set: { slider: false },
     });
 
     const sliders = await Article.find({
-      slider: true,
-    }).sort({
-      sliderOrder: 1,
-    });
+      sliderOrder: { $type: "number" },
+    }).sort({ sliderOrder: 1 });
 
     for (let i = 0; i < sliders.length; i++) {
       sliders[i].sliderOrder = i + 1;
