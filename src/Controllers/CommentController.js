@@ -1,16 +1,24 @@
 import { Comment } from "../Models/CommentSchema.js";
 import { errHandler, responseHandler } from "../helper/response.js";
 
-const OnComment = (req, res) => {
-  const body = req.body;
-  Comment.create(body)
-    .then((data) => {
-     
-      responseHandler(res, data);
-    })
-    .catch(() => {
-      errHandler(res, 5, errHandler);
+const OnComment = async (req, res) => {
+  try {
+    console.log(req.body);
+
+    const data = await Comment.create(req.body);
+
+    return res.json({
+      success: true,
+      data,
     });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
 };
 const DeleteComment = (req, res) => {
   const { id } = req.query;
