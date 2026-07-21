@@ -66,35 +66,82 @@ const getPhotoById = async (req, res) => {
 
 const getAllPhotos = async (req, res) => {
   try {
-    let { id, title, status } = req.query;
-    let obj = {};
+    let {
+      id,
+      title,
+      status,
+      page,
+      limit,
+      paginate,
+    } = req.query;
+
+    const filter = {};
+
     if (id) {
-      obj._id = id;
+      filter._id = id;
     }
+
     if (title) {
-      let regex = new RegExp(title, "i");
-      obj.title = regex;
+      filter.title = new RegExp(title, "i");
     }
-    if (status) {
-      obj.status = status;
+
+    if (status !== undefined) {
+      filter.status = status === "true";
     }
-    const allPhotos = await Photo.find(obj);
-    const reversedPhotos = allPhotos.reverse();
-    // Response में createdAt और updatedAt शामिल करें
-    const photosWithDates = reversedPhotos.map(photo => ({
-      ...photo._doc,
-      createdAt: photo.createdAt,
-      updatedAt: photo.updatedAt
-    }));
 
-    // const reversedPhotos = allPhotos.reverse();
-    // res.json(reversedPhotos.slice(0, 10));
+    const total = await Photo.countDocuments(filter);
 
-    res.json(photosWithDates);
+    let query = Photo.find(filter).sort({ createdAt: -1 });
 
+    // Pagination
+    if (paginate === "true") {
+      page = Number(page) || 1;
+      limit = Number(limit) || 10;
+
+      const skip = (page - 1) * limit;
+
+      const photos = await query.skip(skip).limit(limit);
+
+      return res.json({
+        success: true,
+        data: photos,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      });
+    }
+
+    // Only limit (Home page etc.)
+    if (limit) {
+      const photos = await query.limit(Number(limit));
+
+      return res.json({
+        success: true,
+        total: photos.length,
+        data: photos,
+      });
+    }
+
+    // All Photos
+    const photos = await query;
+
+    return res.json({
+      success: true,
+      total: photos.length,
+      data: photos,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Internal Server Error");
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 const approvedPhotos = (req, res) => {

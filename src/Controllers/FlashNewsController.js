@@ -2,13 +2,17 @@ import { flashnews } from "../Models/FlashSchema.js";
 import { errHandler, responseHandler } from "../helper/response.js";
 
 const uploadNews = (req, res) => {
-  let body = req.body;
-  let { id } = req.query;
-  let idPrefix = "LOKFL";
+  const body = req.body;
+  const { id } = req.query;
+
+  const link = body.link || "";
+  const slug = (link.split("/details/")[1] || "").split("?")[0];
+
   flashnews
     .create({
-      _id: `${idPrefix}${id}+${Date.now()}`,
+      _id: `LOKFL${id}+${Date.now()}`,
       ...body,
+      slug,
       userId: id,
     })
     .then((data) => {
@@ -24,11 +28,19 @@ const updateNews = (req, res) => {
   const { id } = req.params;
   const { link, slugName } = req.body;
 
+  const slug = (link.split("/details/")[1] || "").split("?")[0];
+
   flashnews
     .findByIdAndUpdate(
       id,
-      { $set: { link, slugName } },
-      { new: true, useFindAndModify: false }
+      {
+        $set: {
+          link,
+          slugName,
+          slug,
+        },
+      },
+      { new: true }
     )
     .then((data) => {
       if (data) {
@@ -84,18 +96,22 @@ const updateNewsStatus = (req, res) => {
 
 const getAllNews = async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1; // Default to page 1
-    const limit = parseInt(req.query.limit) || 10; // Default to 10 items per page
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const total = await flashnews.countDocuments(); // Total count for frontend
+    const total = await flashnews.countDocuments();
+
     const data = await flashnews
       .find({})
+      .select("_id link slug slugName status createdAt updatedAt userId")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
 
-    responseHandler(res, {
+    return res.json({
+      success: true,
       total,
       page,
       limit,
@@ -104,7 +120,10 @@ const getAllNews = async (req, res) => {
     });
   } catch (err) {
     console.log(err);
-    errHandler(res, "Failed to fetch flash news", 500);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 

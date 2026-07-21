@@ -52,24 +52,84 @@ const DeleteStory = (req, res) => {
 
 const getAllStories = async (req, res) => {
   try {
-    let { id, title, status } = req.query;
-    let obj = {};
+    let {
+      id,
+      title,
+      status,
+      page,
+      limit,
+      paginate,
+    } = req.query;
+
+    const filter = {};
+
     if (id) {
-      obj._id = id;
+      filter._id = id;
     }
+
     if (title) {
-      let regex = new RegExp(title, "i");
-      obj.title = regex;
+      filter.title = new RegExp(title, "i");
     }
-    if (status) {
-      obj.status = status;
+
+    if (status !== undefined) {
+      filter.status = status === "true";
     }
-    const allStories = await Story.find(obj);
-    const reversedStories = allStories.reverse();
-    res.json(reversedStories.slice(0, 10));
+
+    // Total Count
+    const total = await Story.countDocuments(filter);
+
+    // Base Query
+    let query = Story.find(filter).sort({ _id: -1 });
+
+    // Pagination ON
+    if (paginate === "true") {
+      page = Number(page) || 1;
+      limit = Number(limit) || 10;
+
+      const skip = (page - 1) * limit;
+
+      const stories = await query.skip(skip).limit(limit);
+
+      return res.json({
+        success: true,
+        data: stories,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      });
+    }
+
+    // Only limit (Example: Home page)
+    if (limit) {
+      const stories = await query.limit(Number(limit));
+
+      return res.json({
+        success: true,
+        total: stories.length,
+        data: stories,
+      });
+    }
+
+    // Return All Data
+    const stories = await query;
+
+    return res.json({
+      success: true,
+      total: stories.length,
+      data: stories,
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).send("Internal Server Error");
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
