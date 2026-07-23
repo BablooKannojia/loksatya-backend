@@ -1,4 +1,4 @@
-import Live from "../Models/LiveSchema.js";
+import { Live } from "../Models/LiveSchema.js";
 import { errHandler, responseHandler } from "../helper/response.js";
 
 const LiveStream = (req, res) => {

@@ -16,4 +16,4 @@ const LiveSchema = mongoose.Schema({
 });
 
 const Live = mongoose.model("live", LiveSchema);
-export default Live;
+export { Live };

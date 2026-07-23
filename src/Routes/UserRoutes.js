@@ -114,6 +114,7 @@ import {
   getCategoriesWithArticles,
 } from "../Controllers/HomepageController.js";
 import { getCommonData } from "../Controllers/HomepageController.js";
+import { Dashboard } from "../Controllers/DashboardController.js";
 
 const route = express.Router();
 
@@ -196,6 +197,7 @@ route.route("/polls/:id/vote").post(updatePool);
 route.route("/subcategory").get(getSubCategory).post(createSubCategory);
 route.route("/delete_pool/:id").delete(deletePools);
 
+route.route("/dashboard").get(Dashboard);
 route.route("/dashboard/users").get(DashBoradUser);
 route.route("/dashboard/breakingNews").get(dashBoardBreakingNews);
 route.route("/dashboard/topStories").get(dashBoardTopStories);
@@ -211,7 +213,6 @@ route.route("/dashboard/poll").get(DashboardPoll);
 route.route("/dashboard/report").get(DashboardReport);
 route.route("/dashboard/content").get(DashboardContent);
 route.route("/dashboard/subCategory").get(DashboardSubCategory);
-// different format than the rest of the above dashboards data
 route.route("/dashboard/categroyAritcles").get(dashBoardCategoryArticles);
 
 export default route;

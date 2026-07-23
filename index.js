@@ -32,6 +32,8 @@ const corsOptions = {
       "https://loksatya.com",
       "https://www.loksatya.com",
       "https://admin.loksatya.com",
+      "http://localhost:3000",   // 👈 add local frontend port
+      "http://localhost:5000", 
     ];
     if (!origin) return callback(null, true);
     if (
@@ -73,10 +75,10 @@ app.use((req, res, next) => {
 
 
 // Middleware
-app.use(cors({
-  origin: ['https://loksatya.com', 'https://admin.loksatya.com'],
-  credentials: true
-}));
+// app.use(cors({
+//   origin: ['https://loksatya.com', 'https://admin.loksatya.com'],
+//   credentials: true
+// }));
 app.use(express.json());
 app.use(cors(corsOptions));
 if (process.env.ENV === "development") app.use(morgan("dev"));

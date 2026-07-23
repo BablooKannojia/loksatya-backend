@@ -1,38 +1,3 @@
-// import mongoose from "mongoose";
-
-// const photoSchema = new mongoose.Schema({
-//   title: {
-//     type: String,
-//     required: true,
-//   },
-//   images: {
-//     type: [Object],
-//     required: true,
-//   },
-//   status: {
-//     type: Boolean,
-//     default: true,
-//   },
-//   url: {
-//     type: String,
-//     default: "",
-//   },
-//   albumPeriority: {
-//     type: [Boolean],
-//     required: true,
-//   },
-//   periority: {
-//     type: Boolean,
-//     required: true,
-//     enum: [true, false],
-//   }
-// }, { 
-//   timestamps: true // यह सही जगह है - schema के दूसरे पैरामीटर के रूप में
-// });
-
-// const Photo = mongoose.model("Photo", photoSchema);
-// export { Photo };
-
 import mongoose from "mongoose";
 
 const photoSchema = new mongoose.Schema({
