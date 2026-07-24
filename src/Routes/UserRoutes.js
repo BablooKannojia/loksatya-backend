@@ -76,6 +76,7 @@ import {
 } from "../Controllers/PollController.js";
 import {
   DashBoardFlashNews,
+  deleteFlashNews,
   getAllNews,
   updateNews,
   updateNewsStatus,
@@ -188,6 +189,7 @@ route.route("/ads_delete/:id").delete(DeleteAds);
 route.route("/flashnews").post(uploadNews).get(getAllNews);
 route.route("/flashnews/:id/edit").put(updateNews);
 route.route("/flashnews/:id/status").put(updateNewsStatus);
+route.route("/flashnews/:id").delete(deleteFlashNews);
 route.route("/live").get(GetLiveStream).post(LiveStream);
 route.route("/live/:id").delete(DeleteLiveStream);
 route.route("/comment").get(GetComment).post(OnComment).delete(DeleteComment);

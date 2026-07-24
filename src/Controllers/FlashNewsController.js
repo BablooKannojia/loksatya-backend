@@ -82,18 +82,6 @@ const updateNewsStatus = (req, res) => {
     });
 };
 
-// const getAllNews = (req, res) => {
-//   flashnews
-//     .find({})
-//     .sort({ createdAt: -1 }) // Sort by most recent
-//     .then((data) => {
-//       responseHandler(res, data);
-//     })
-//     .catch(() => {
-//       errHandler(res, "not Found", 404);
-//     });
-// };
-
 const getAllNews = async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
@@ -126,7 +114,6 @@ const getAllNews = async (req, res) => {
     });
   }
 };
-
 
 const DashBoardFlashNews = async (req, res) => {
   try {
@@ -189,10 +176,30 @@ const DashBoardFlashNews = async (req, res) => {
   }
 };
 
+const deleteFlashNews = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const data = await flashnews.findByIdAndDelete(id);
+
+    if (!data) {
+      return errHandler(res, "News item not found", 404);
+    }
+
+    return responseHandler(res, {
+      message: "Flash news deleted successfully",
+    });
+  } catch (err) {
+    console.log(err);
+    return errHandler(res, "Internal Server Error", 500);
+  }
+};
+
 export {
   uploadNews,
   getAllNews,
   updateNews,
+  deleteFlashNews,
   updateNewsStatus,
   DashBoardFlashNews,
 };
