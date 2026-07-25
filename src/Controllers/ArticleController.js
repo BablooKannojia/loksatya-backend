@@ -886,29 +886,89 @@ const ArticleContentDelete = (req, res) => {
       errHandler(res, "Article Content was not Deleted", 403);
     });
 };
+// const ArticleContentGet = async (req, res) => {
+//   try {
+//     const { id, adminId, type, page = 1, limit = 50 } = req.query;
+    
+//     // Build query efficiently
+//     const query = {};
+//     if (id) query._id = id;
+//     if (type) query.type = type;
+//     if (adminId) query.adminId = adminId;
+
+//     // Use lean() and projection for better performance
+//     const data = await Content.find(query)
+//       .select('type text sequence adminId createdAt')
+//       .lean()
+//       .maxTimeMS(10000); // Add timeout
+
+//     responseHandler(res, data);
+//   } catch (error) {
+//     console.error('Error in ArticleContentGet:', error);
+//     errHandler(res, "Failed to fetch content", 500);
+//   }
+// };
 const ArticleContentGet = async (req, res) => {
   try {
-    const { id, adminId, type, page = 1, limit = 50 } = req.query;
-    
-    // Build query efficiently
+    const {
+      id,
+      adminId,
+      type,
+      page = 1,
+      limit = 50,
+      search = "",
+    } = req.query;
+
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNumber = Math.min(
+      Math.max(parseInt(limit, 10) || 50, 1),
+      100
+    );
+
+    const skip = (pageNumber - 1) * limitNumber;
+
     const query = {};
+
     if (id) query._id = id;
     if (type) query.type = type;
     if (adminId) query.adminId = adminId;
 
-    // Use lean() and projection for better performance
-    const data = await Content.find(query)
-      .select('type text sequence adminId createdAt')
-      .lean()
-      .maxTimeMS(10000); // Add timeout
+    // Search only when requested
+    if (search.trim()) {
+      query.text = {
+        $regex: search.trim(),
+        $options: "i",
+      };
+    }
 
-    responseHandler(res, data);
+    const [data, total] = await Promise.all([
+      Content.find(query)
+        .select("type text sequence adminId createdAt")
+        .sort({ text: 1 })
+        .skip(skip)
+        .limit(limitNumber)
+        .lean()
+        .maxTimeMS(10000),
+
+      Content.countDocuments(query),
+    ]);
+
+    responseHandler(res, {
+      data,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber),
+        hasNextPage: pageNumber * limitNumber < total,
+        hasPreviousPage: pageNumber > 1,
+      },
+    });
   } catch (error) {
-    console.error('Error in ArticleContentGet:', error);
+    console.error("Error in ArticleContentGet:", error);
     errHandler(res, "Failed to fetch content", 500);
   }
 };
-
 const DashboardContent = async (req, res) => {
   try {
     const { date } = req.query;
