@@ -483,7 +483,8 @@ export const getCommonData = async (req, res) => {
       menu,
     });
   } catch (error) {
-    console.error(error);
+    console.error("getCommonData Error:", error);
+    console.error(error.stack);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch common data",
