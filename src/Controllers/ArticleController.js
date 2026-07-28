@@ -467,7 +467,42 @@ const getArticle = async (req, res) => {
 
     // ✅ FIXED: Main query with optimized sorting
     let sortCriteria = { createdAt: -1 };
-    
+    if (queryParams.dashboard === "true") {
+      const sliderArticles = await Article.find({
+        ...query,
+        sliderOrder: { $exists: true },
+      })
+        .sort({ sliderOrder: 1 })
+        .lean();
+
+      const normalArticles = await Article.find({
+        ...query,
+        sliderOrder: { $exists: false },
+      })
+        .sort({ createdAt: -1 })
+        .limit(pageSize)
+        .lean();
+
+      const data = [...sliderArticles, ...normalArticles].slice(0, pageSize);
+
+      const total = await Article.countDocuments(query);
+
+      const updatedData = data.map((item) => ({
+        ...item,
+        shareUrl: `https://loksatya.com/details/${item.slug || item._id}?id=${item._id}`,
+      }));
+
+      return responseHandler(res, {
+        data: updatedData,
+        total,
+        limit: pageSize,
+        page: currentPage,
+        pages: Math.ceil(total / pageSize),
+        hasNext: currentPage < Math.ceil(total / pageSize),
+        hasPrev: currentPage > 1,
+      });
+    }
+
     if (queryParams.fixedPosition) {
       sortCriteria = { fixedPosition: 1, createdAt: -1 };
     }
