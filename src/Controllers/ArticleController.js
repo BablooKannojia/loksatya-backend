@@ -82,25 +82,25 @@ const fetchSliderBreakingNews = async (limit, query) => {
 const fetchPriortyArticles = async (limit, query) => {
   try {
     console.log('fetchPriortyArticles called with query:', JSON.stringify(query));
-    
+
     // Ensure we're filtering by priority AND the original query
-    const finalQuery = { 
-      ...query, 
-      priority: true 
+    const finalQuery = {
+      ...query,
+      priority: true
     };
     console.log('Final priority query:', JSON.stringify(finalQuery));
-    
+
     const data = await Article.find(finalQuery)
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean()
       .maxTimeMS(30000);
-    
+
     console.log('Priority articles found:', data.length);
     data.forEach((article, index) => {
       console.log(`Article ${index + 1}:`, article.topic, '- Priority:', article.priority);
     });
-    
+
     return data;
   } catch (error) {
     console.error('Error in fetchPriortyArticles:', error);
@@ -109,7 +109,7 @@ const fetchPriortyArticles = async (limit, query) => {
 };
 const shareUrl = async (req, res) => {
   const { relocation, id } = req.query;
-  
+
   if (relocation) {
     try {
       relocation = decodeURIComponent(relocation);
@@ -315,15 +315,15 @@ const getArticle = async (req, res) => {
     }
 
     // ✅ FIXED: Skip cache for dynamic queries completely
-    const skipCache = queryParams.pagenation === "true" || 
-                     queryParams.search || 
-                     queryParams.keyword || 
-                     queryParams.category || 
-                     queryParams.topic ||
-                     queryParams.fixedPosition;
+    const skipCache = queryParams.pagenation === "true" ||
+      queryParams.search ||
+      queryParams.keyword ||
+      queryParams.category ||
+      queryParams.topic ||
+      queryParams.fixedPosition;
 
     const cacheKey = generateCacheKey('articles', queryParams);
-    
+
     // ✅ FIXED: Only cache for simple queries
     if (!skipCache) {
       const cachedData = await redisClient.get(cacheKey);
@@ -336,7 +336,7 @@ const getArticle = async (req, res) => {
 
     // ✅ FIXED: Build query efficiently
     const query = {};
-    
+
     // Basic filters
     if (queryParams.approved !== undefined) {
       query.approved = queryParams.approved === "true";
@@ -380,32 +380,32 @@ const getArticle = async (req, res) => {
 
     // ✅ FIXED: Text search - optimized with AND logic for same values
     const textConditions = [];
-    
+
     // If all search parameters have the same value, use AND logic
     const searchValues = [
       queryParams.topic,
-      queryParams.category, 
+      queryParams.category,
       queryParams.search,
       queryParams.keyword
     ].filter(Boolean);
-    
-    const allSameValue = searchValues.length > 0 && 
-                        new Set(searchValues.map(v => v.trim())).size === 1;
+
+    const allSameValue = searchValues.length > 0 &&
+      new Set(searchValues.map(v => v.trim())).size === 1;
 
     if (allSameValue) {
       // All search parameters have the same value - use AND across fields
       const searchTerm = searchValues[0].trim();
       const regex = new RegExp(searchTerm, "i");
-      
+
       query.$and = [
         { $or: [
-          { topic: regex },
-          { category: regex },
-          { subCategory: regex },
-          { title: regex }
-        ]}
+            { topic: regex },
+            { category: regex },
+            { subCategory: regex },
+            { title: regex }
+          ]}
       ];
-      
+
       // Also include specific field matches if provided
       if (queryParams.topic) {
         query.$and.push({ topic: regex });
@@ -537,7 +537,7 @@ const getArticle = async (req, res) => {
       if (!skipCache) {
         await redisClient.set(cacheKey, result, 300);
       }
-      
+
       console.timeEnd('getArticle_execution');
       return responseHandler(res, result);
     } else {
@@ -556,7 +556,7 @@ const getArticle = async (req, res) => {
       if (!skipCache) {
         await redisClient.set(cacheKey, updatedData, 300);
       }
-      
+
       console.timeEnd('getArticle_execution');
       return responseHandler(res, updatedData);
     }
@@ -697,15 +697,15 @@ const PostArticle = async (req, res) => {
   } = req.body;
 
   const { id } = req.params;
-  
+
   let translatedTopic = topic;
   try {
     const result = await translate(topic, { from: 'hi', to: 'en' });
-    translatedTopic = result.text.toLowerCase(); 
+    translatedTopic = result.text.toLowerCase();
   } catch (translationError) {
     console.error("Translation error, using original text:", translationError);
   }
-  
+
   const customId = translatedTopic + Date.now().toString().substring(0, 10);
 
   // ✅ FIXED: Use publishAt directly as UTC, no conversion needed
@@ -714,7 +714,7 @@ const PostArticle = async (req, res) => {
 
   if (publishAt) {
     const publishDate = new Date(publishAt);
-    
+
     if (publishDate > new Date()) {
       finalStatus = 'scheduled';
       finalPublishAt = publishDate; // Already in UTC
@@ -924,7 +924,7 @@ const ArticleContentDelete = (req, res) => {
 // const ArticleContentGet = async (req, res) => {
 //   try {
 //     const { id, adminId, type, page = 1, limit = 50 } = req.query;
-    
+
 //     // Build query efficiently
 //     const query = {};
 //     if (id) query._id = id;
@@ -1108,7 +1108,7 @@ const createSubCategory = async (req, res) => {
 const getSubCategory = async (req, res) => {
   try {
     const { category } = req.query;
-    
+
     const query = {};
     if (category) query.category = category;
 
@@ -1445,7 +1445,7 @@ const dashBoardCategoryArticles = async (req, res) => {
 const clearFixedPosition = async (req, res) => {
   try {
     const { position } = req.body;
-    
+
     // Validate position
     if (![1, 2].includes(position)) {
       return res.status(400).json({ message: "Invalid position. Must be 1 or 2" });
@@ -1468,7 +1468,7 @@ const clearFixedPosition = async (req, res) => {
 const setFixedPosition = async (req, res) => {
   try {
     const { articleId, position } = req.body;
-    
+
     // Validate position
     if (![1, 2].includes(position)) {
       return res.status(400).json({ message: "Invalid position. Must be 1 or 2" });
@@ -1477,8 +1477,8 @@ const setFixedPosition = async (req, res) => {
     // Check if this article is already in another position
     const currentArticle = await Article.findById(articleId);
     if (currentArticle?.fixedPosition && currentArticle.fixedPosition !== position) {
-      return res.status(400).json({ 
-        message: `Article is already in position ${currentArticle.fixedPosition}. Clear it first.` 
+      return res.status(400).json({
+        message: `Article is already in position ${currentArticle.fixedPosition}. Clear it first.`
       });
     }
 
@@ -1526,12 +1526,19 @@ const getFixedPositionArticles = async (req, res) => {
 
 const addSliderOrder = async (req, res) => {
   try {
-    const { id } = req.body;
+    const { id, sliderOrder } = req.body;
 
-    if (!id) {
+    if (!id || !sliderOrder) {
       return res.status(400).json({
         success: false,
-        message: "Article id is required",
+        message: "id and sliderOrder required",
+      });
+    }
+
+    if (sliderOrder < 1 || sliderOrder > 4) {
+      return res.status(400).json({
+        success: false,
+        message: "Slider position must be between 1-4",
       });
     }
 
@@ -1545,58 +1552,59 @@ const addSliderOrder = async (req, res) => {
     }
 
     // Already assigned check
-    if (
-      article.sliderOrder !== null &&
-      article.sliderOrder !== undefined &&
-      typeof article.sliderOrder === "number"
-    ) {
+    if (typeof article.sliderOrder === "number") {
       return res.status(400).json({
         success: false,
-        message: "Article already assigned a slider position",
+        message: "Already in slider",
       });
     }
 
-    // ✅ FIX: max nikalo, count nahi
-    const maxResult = await Article.aggregate([
-      { $match: { sliderOrder: { $type: "number" } } }, // sirf numeric values
-      { $group: { _id: null, max: { $max: "$sliderOrder" } } },
-    ]);
-
-    const currentMax = maxResult.length > 0 ? maxResult[0].max : 0;
-
-    // Total kitne slider mein hain wo bhi count karlo limit ke liye
-    const total = await Article.countDocuments({
-      sliderOrder: { $type: "number" },
+    // jis article ka sliderOrder = 4 hai usko slider se hata do
+    const lastArticle = await Article.findOne({
+      sliderOrder: 4,
     });
 
-    console.log("CURRENT MAX:", currentMax, "TOTAL:", total);
-
-    if (total >= 4) {
-      return res.status(400).json({
-        success: false,
-        message: "Maximum 4 slider articles allowed",
+    if (lastArticle) {
+      await Article.findByIdAndUpdate(lastArticle._id, {
+        $unset: {
+          sliderOrder: "",
+        }
       });
     }
 
-    const nextOrder = currentMax + 1;
-
-    const updatedArticle = await Article.findByIdAndUpdate(
-      id,
+    // sabko niche shift karo
+    await Article.updateMany(
       {
-        $set: {
-          slider: true,
-          sliderOrder: nextOrder,
+        sliderOrder: {
+          $gte: sliderOrder,
+          $lte: 3,
         },
       },
-      { new: true, runValidators: true }
+      {
+        $inc: {
+          sliderOrder: 1,
+        },
+      }
     );
+
+    // naya article insert
+    await Article.findByIdAndUpdate(id, {
+      $set: {
+        sliderOrder,
+      },
+    });
+
+    const data = await Article.find({
+      sliderOrder: { $type: "number" },
+    }).sort({
+      sliderOrder: 1,
+    });
 
     return res.json({
       success: true,
-      data: updatedArticle,
+      data,
     });
   } catch (err) {
-    console.log(err);
     return res.status(500).json({
       success: false,
       message: err.message,
@@ -1645,14 +1653,57 @@ const updateSliderOrder = async (req, res) => {
       });
     }
 
-    if (current.sliderOrder == null) {
-      return res.status(400).json({
-        success: false,
-        message: "Article is not in slider",
+    // if (current.sliderOrder == null) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Article is not in slider",
+    //   });
+    // }
+
+    const oldOrder = current.sliderOrder;
+
+    // Agar article slider me nahi hai
+    if (oldOrder == null) {
+
+      // Position 4 wala article remove
+      await Article.findOneAndUpdate(
+        { sliderOrder: 4 },
+        {
+          $unset: {
+            sliderOrder: "",
+          },
+        }
+      );
+
+      // Target position se sabko niche shift karo
+      await Article.updateMany(
+        {
+          sliderOrder: {
+            $gte: sliderOrder,
+            $lte: 3,
+          },
+        },
+        {
+          $inc: {
+            sliderOrder: 1,
+          },
+        }
+      );
+
+      // Naye article ko desired position de do
+      current.sliderOrder = sliderOrder;
+      await current.save();
+
+      const data = await Article.find({
+        sliderOrder: { $type: "number" },
+      }).sort({ sliderOrder: 1 });
+
+      return res.json({
+        success: true,
+        data,
       });
     }
 
-    const oldOrder = current.sliderOrder;
 
     if (oldOrder === sliderOrder) {
       return res.json({
