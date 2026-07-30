@@ -333,6 +333,7 @@ const getUser = (req, res) => {
     }
   }
   User.find(obj)
+    .select("-password")
     .sort({ createdAt: -1 })
     .then((data) => {
       responseHandler(res, data);
