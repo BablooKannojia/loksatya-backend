@@ -14,7 +14,6 @@ import {translate} from '@vitalets/google-translate-api';
 import { redisClient } from '../Config/redisClient.js';
 
 const queryCache = new Map();
-// const CACHE_TTL = 30000; // 30 seconds
 
 // Cache TTL configurations
 const CACHE_TTL = {
@@ -1627,8 +1626,31 @@ const getSliderArticles = async (req, res) => {
   }
 };
 const updateSliderOrder = async (req, res) => {
-  try {
+  try {    
     const { id, sliderOrder } = req.body;
+    const userId = req.headers.userid;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "User id missing",
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.role !== "admin" && !user.acsses?.includes("sliderorder")) {
+      return res.status(403).json({
+        success: false,
+        message: "Permission denied!"
+      })
+    }
 
     if (!id || !sliderOrder) {
       return res.status(400).json({

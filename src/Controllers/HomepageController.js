@@ -418,63 +418,86 @@ export const getCommonData = async (req, res) => {
     }));
 
     // Sab categories ke latest 7 articles ek hi query me
-    const articles = await Article.aggregate([
-      {
-        $match: {
-          topic: { $in: categoryNames },
+    const response = await Promise.all(
+      categories.map(async (cat) => {
+        const data = await Article.find({
+          topic: cat.text,
           type: "img",
           priority: true,
           status: "online",
-        },
-      },
-      {
-        $sort: {
-          createdAt: -1,
-        },
-      },
-      {
-        $group: {
-          _id: "$topic",
-          articles: {
-            $push: {
-              _id: "$_id",
-              title: "$title",
-              slug: "$slug",
-              image: "$image",
-              topic: "$topic",
-              createdAt: "$createdAt",
-              newsType: "$newsType",
-              status: "$status",
-              priority: "$priority",
-              type: "$type",
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          category: "$_id",
-          data: {
-            $slice: ["$articles", 7],
-          },
-        },
-      },
-    ]).allowDiskUse(true);
+        })
+          .sort({ createdAt: -1 })
+          .limit(7)
+          .select("_id title slug image topic createdAt newsType status priority type")
+          .lean();
 
-    const articleMap = {};
-    articles.forEach((item) => {
-      articleMap[item.category] = item.data.map((article) => ({
-        ...article,
-        shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
-      }));
-    });
+        return {
+          category: cat.text,
+          sequence: cat.sequence,
+          data: data.map((article) => ({
+            ...article,
+            shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+          })),
+        };
+      })
+    );
+    // const articles = await Article.aggregate([
+    //   {
+    //     $match: {
+    //       topic: { $in: categoryNames },
+    //       type: "img",
+    //       priority: true,
+    //       status: "online",
+    //     },
+    //   },
+    //   {
+    //     $sort: {
+    //       createdAt: -1,
+    //     },
+    //   },
+    //   {
+    //     $group: {
+    //       _id: "$topic",
+    //       articles: {
+    //         $push: {
+    //           _id: "$_id",
+    //           title: "$title",
+    //           slug: "$slug",
+    //           image: "$image",
+    //           topic: "$topic",
+    //           createdAt: "$createdAt",
+    //           newsType: "$newsType",
+    //           status: "$status",
+    //           priority: "$priority",
+    //           type: "$type",
+    //         },
+    //       },
+    //     },
+    //   },
+    //   {
+    //     $project: {
+    //       _id: 0,
+    //       category: "$_id",
+    //       data: {
+    //         $slice: ["$articles", 7],
+    //       },
+    //     },
+    //   },
+    // ]).allowDiskUse(true);
 
-    const response = categories.map((cat) => ({
-      category: cat.text,
-      sequence: cat.sequence,
-      data: articleMap[cat.text] || [],
-    }));
+    // const articleMap = {};
+    // articles.forEach((item) => {
+    //   articleMap[item.category] = item.data.map((article) => ({
+    //     ...article,
+    //     shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+    //   }));
+    // });
+
+    // const response = categories.map((cat) => ({
+    //   category: cat.text,
+    //   sequence: cat.sequence,
+    //   data: articleMap[cat.text] || [],
+    // }));
 
 
     return res.json({
@@ -485,6 +508,7 @@ export const getCommonData = async (req, res) => {
   } catch (error) {
     console.error("getCommonData Error:", error);
     console.error(error.stack);
+     console.log(error.message);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch common data",
