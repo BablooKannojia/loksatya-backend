@@ -117,6 +117,18 @@ import {
 import { getCommonData } from "../Controllers/HomepageController.js";
 import { Dashboard } from "../Controllers/DashboardController.js";
 
+import {
+  CreateLiveNews,
+  AddLiveNewsUpdate,
+  GetAllLiveNews,
+  GetSingleLiveNews,
+  GetAllLiveNewsAdmin,
+  UpdateLiveNews,
+  UpdateLiveNewsUpdate,
+  DeleteLiveNews,
+  DeleteLiveNewsUpdate,
+} from "../Controllers/liveNewsController.js";
+
 const route = express.Router();
 
 route.route("/registerd").post(RegisterdUser);
@@ -216,5 +228,43 @@ route.route("/dashboard/report").get(DashboardReport);
 route.route("/dashboard/content").get(DashboardContent);
 route.route("/dashboard/subCategory").get(DashboardSubCategory);
 route.route("/dashboard/categroyAritcles").get(dashBoardCategoryArticles);
+
+// Main live news CRUD
+route.route("/live-news",
+  upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "gallery", maxCount: 15 },
+  ])
+).post(CreateLiveNews);
+route.route("/live-news").get(GetAllLiveNews);
+route.route("/live-news/admin").get(GetAllLiveNewsAdmin);
+route.route("/live-news/:slug").get(GetSingleLiveNews);
+route.route(
+  "/live-news/:id",
+  upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "gallery", maxCount: 15 },
+  ])
+).put(UpdateLiveNews);
+
+route.route("/live-news/:id").delete(DeleteLiveNews);
+
+// Timeline updates (the "1 ghante pahle" entries)
+route.route(
+  "/live-news/:id/update",
+  upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "images", maxCount: 10 },
+  ])
+).post(AddLiveNewsUpdate);
+route.route(
+  "/live-news/update/:id",
+  upload.fields([
+    { name: "image", maxCount: 1 },
+    { name: "images", maxCount: 10 },
+  ])
+).put(UpdateLiveNewsUpdate);
+route.route("/live-news/update/:id").delete(DeleteLiveNewsUpdate);
+
 
 export default route;
