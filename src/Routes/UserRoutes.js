@@ -230,12 +230,18 @@ route.route("/dashboard/subCategory").get(DashboardSubCategory);
 route.route("/dashboard/categroyAritcles").get(dashBoardCategoryArticles);
 
 // Main live news CRUD
-route.route("/live-news",
-  upload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "gallery", maxCount: 15 },
-  ])
-).post(CreateLiveNews);
+// route.route("/live-news",
+//   upload.fields([
+//     { name: "image", maxCount: 1 },
+//     { name: "gallery", maxCount: 15 },
+//   ])
+// ).post(CreateLiveNews);
+
+route.post(
+  "/live-news",
+  upload.any(),
+  CreateLiveNews
+);
 route.route("/live-news").get(GetAllLiveNews);
 route.route("/live-news/admin").get(GetAllLiveNewsAdmin);
 route.route("/live-news/:slug").get(GetSingleLiveNews);

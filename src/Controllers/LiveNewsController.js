@@ -44,77 +44,85 @@ const deleteFirebaseFile = async (url) => {
 
 // ==================== CREATE MAIN LIVE NEWS ====================
 export const CreateLiveNews = async (req, res) => {
-    try {
-        const {
-            title,
-            slug,
-            description,
-            category,
-            subCategory,
-            reportedBy,
-            publishBy,
-            tags,
-            status = "online",
-            live = true,
-        } = req.body;
+  try {
+    const {
+      title,
+      slug,
+      description,
+      category,
+      subCategory,
+      reportedBy,
+      publishBy,
+      tags,
+      status = "online",
+      live = true,
+    } = req.body;
 
-        const finalSlug = slug?.trim().toLowerCase();
+    const finalSlug = slug?.trim().toLowerCase();
 
-        if (!title) return errHandler(res, "Title is required", 400);
-        if (!slug) return errHandler(res, "Slug is required", 400);
-        if (!description) return errHandler(res, "Description is required", 400);
-        if (!category) return errHandler(res, "Category is required", 400);
+    // Slug duplicate check (sirf slug ho tabhi)
+    if (finalSlug) {
+      const checkSlug = await LiveNews.findOne({ slug: finalSlug });
 
-        const checkSlug = await LiveNews.findOne({ slug: finalSlug });
-        if (checkSlug) {
-            return errHandler(res, "Slug already exists", 400);
-        }
-
-        let image = "";
-        let gallery = [];
-
-        if (req.files?.image?.length > 0) {
-            image = await uploadToFirebase(req.files.image[0], "live-news/main");
-        }
-        if (req.files?.gallery?.length) {
-            gallery = await uploadMultipleImages(req.files.gallery, "live-news/gallery");
-        }
-
-        let finalTags = [];
-        if (tags) {
-            if (Array.isArray(tags)) {
-                finalTags = tags;
-            } else {
-                try {
-                    // form data se JSON.stringify(tags) aata hai frontend se
-                    const parsed = JSON.parse(tags);
-                    finalTags = Array.isArray(parsed) ? parsed : [];
-                } catch {
-                    finalTags = tags.split(",").map((x) => x.trim()).filter(Boolean);
-                }
-            }
-        }
-
-        const news = await LiveNews.create({
-            title,
-            slug: finalSlug,
-            description,
-            category,
-            subCategory,
-            image,
-            gallery,
-            reportedBy,
-            publishBy,
-            tags: finalTags,
-            status,
-            live,
-        });
-
-        return responseHandler(res, news);
-    } catch (err) {
-        console.error(err);
-        return errHandler(res, err.message, 500);
+      if (checkSlug) {
+        return errHandler(res, "Slug already exists", 400);
+      }
     }
+
+    let image = "";
+    let gallery = [];
+
+    if (req.files?.image?.length > 0) {
+      image = await uploadToFirebase(
+        req.files.image[0],
+        "live-news/main"
+      );
+    }
+
+    if (req.files?.gallery?.length > 0) {
+      gallery = await uploadMultipleImages(
+        req.files.gallery,
+        "live-news/gallery"
+      );
+    }
+
+    let finalTags = [];
+
+    if (tags) {
+      if (Array.isArray(tags)) {
+        finalTags = tags;
+      } else {
+        try {
+          finalTags = JSON.parse(tags);
+        } catch {
+          finalTags = tags
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean);
+        }
+      }
+    }
+
+    const news = await LiveNews.create({
+      title,
+      slug: finalSlug,
+      description,
+      category,
+      subCategory,
+      image,
+      gallery,
+      reportedBy,
+      publishBy,
+      tags: finalTags,
+      status,
+      live,
+    });
+
+    return responseHandler(res, news);
+  } catch (err) {
+    console.error(err);
+    return errHandler(res, err.message, 500);
+  }
 };
 
 // ==================== ADD A LIVE UPDATE (timeline entry) ====================
