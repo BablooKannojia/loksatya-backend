@@ -478,69 +478,175 @@ const getArticle = async (req, res) => {
     // ✅ FIXED: Main query with optimized sorting
     let sortCriteria = { createdAt: -1 };
     if (queryParams.dashboard === "true") {
-      const sliderArticles = await Article.find({
-        ...query,
-        sliderOrder: { $exists: true },
-      })
-        .sort({ sliderOrder: 1 })
-        .lean();
+  console.time("dashboard_query");
 
-      const normalArticles = await Article.find({
-        ...query,
-        sliderOrder: { $exists: false },
-      })
-        .sort({ createdAt: -1 })
-        .lean();
+  // ==========================================
+  // SLIDER CONTENT
+  // Article + LiveNews
+  // Maximum 4 positions
+  // ==========================================
 
-      // ✅ LiveNews bhi fetch karo (sirf jab category/topic filter na ho, ya generic dashboard feed ho)
-      const liveNewsItems = await LiveNews.find({
-        status: query.status || "online",
-      })
-        .lean();
+  const [sliderArticles, sliderLiveNews] = await Promise.all([
+    Article.find({
+      ...query,
+      sliderOrder: { $gte: 1, $lte: 4 },
+    })
+      .sort({ sliderOrder: 1 })
+      .lean(),
 
-      // ✅ LiveNews ko Article jaisi shape do taaki frontend same tarah render kar sake
-      const normalizedLiveNews = liveNewsItems.map((item) => ({
-        ...item,
-        contentType: "liveNews",              // frontend ko batane ke liye ye LiveNews hai
-        topic: item.category,                  // Article.topic ke equivalent
-        image: item.image,
-        shareUrl: `https://loksatya.com/live-news/${item.slug}`,
-      }));
+    LiveNews.find({
+      status: query.status || "online",
+      live: true,
+      sliderOrder: { $gte: 1, $lte: 4 },
+    })
+      .sort({ sliderOrder: 1 })
+      .lean(),
+  ]);
 
-      const normalizedArticles = [...sliderArticles, ...normalArticles].map((item) => ({
-        ...item,
-        contentType: "article",
-      }));
+  // ==========================================
+  // NORMAL CONTENT
+  // Sirf newest records
+  // ==========================================
 
-      // ✅ Sabko time (createdAt) ke basis pe combine + sort karo,
-      // lekin sliderOrder wale hamesha upar rahenge jaise pehle the
-      const slidered = normalizedArticles.filter((i) => i.sliderOrder !== undefined);
-      const nonSlidered = [...normalizedArticles.filter((i) => i.sliderOrder === undefined), ...normalizedLiveNews]
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const normalLimit = pageSize + skip + 4;
 
-      const combined = [...slidered, ...nonSlidered];
+  const [normalArticles, normalLiveNews] = await Promise.all([
+    Article.find({
+      ...query,
+      sliderOrder: { $exists: false },
+    })
+      .sort({ createdAt: -1 })
+      .limit(normalLimit)
+      .lean(),
 
-      const total = combined.length;
-      const paginated = combined.slice(skip, skip + pageSize);
+    LiveNews.find({
+      status: query.status || "online",
+      live: true,
+      sliderOrder: { $exists: false },
+    })
+      .sort({ createdAt: -1 })
+      .limit(normalLimit)
+      .lean(),
+  ]);
 
-      const updatedData = paginated.map((item) => ({
-        ...item,
-        shareUrl:
-          item.contentType === "liveNews"
-            ? `https://loksatya.com/live-news/${item.slug}`
-            : `https://loksatya.com/details/${item.slug || item._id}?id=${item._id}`,
-      }));
+  // ==========================================
+  // NORMALIZE SLIDER ARTICLES
+  // ==========================================
 
-      return responseHandler(res, {
-        data: updatedData,
-        total,
-        limit: pageSize,
-        page: currentPage,
-        pages: Math.ceil(total / pageSize),
-        hasNext: currentPage < Math.ceil(total / pageSize),
-        hasPrev: currentPage > 1,
-      });
-    }
+  const sliderArticlesData = sliderArticles.map((item) => ({
+    ...item,
+    contentType: "article",
+    shareUrl: `https://loksatya.com/details/${
+      item.slug || item._id
+    }?id=${item._id}`,
+  }));
+
+  // ==========================================
+  // NORMALIZE SLIDER LIVE NEWS
+  // ==========================================
+
+  const sliderLiveNewsData = sliderLiveNews.map((item) => ({
+    ...item,
+    contentType: "liveNews",
+    topic: item.category,
+    shareUrl: `https://loksatya.com/live-news/${item.slug}`,
+  }));
+
+  // ==========================================
+  // MERGE SLIDER
+  // ==========================================
+
+  const slidered = [
+    ...sliderArticlesData,
+    ...sliderLiveNewsData,
+  ].sort((a, b) => {
+    return Number(a.sliderOrder) - Number(b.sliderOrder);
+  });
+
+  // ==========================================
+  // NORMAL ARTICLES
+  // ==========================================
+
+  const normalArticlesData = normalArticles.map((item) => ({
+    ...item,
+    contentType: "article",
+    shareUrl: `https://loksatya.com/details/${
+      item.slug || item._id
+    }?id=${item._id}`,
+  }));
+
+  // ==========================================
+  // NORMAL LIVE NEWS
+  // ==========================================
+
+  const normalLiveNewsData = normalLiveNews.map((item) => ({
+    ...item,
+    contentType: "liveNews",
+    topic: item.category,
+    shareUrl: `https://loksatya.com/live-news/${item.slug}`,
+  }));
+
+  // ==========================================
+  // MERGE NORMAL CONTENT
+  // newest first
+  // ==========================================
+
+  const nonSlidered = [
+    ...normalArticlesData,
+    ...normalLiveNewsData,
+  ].sort((a, b) => {
+    return (
+      new Date(b.createdAt).getTime() -
+      new Date(a.createdAt).getTime()
+    );
+  });
+
+  // ==========================================
+  // FINAL LIST
+  // ==========================================
+
+  const combined = [
+    ...slidered,
+    ...nonSlidered,
+  ];
+
+  // ==========================================
+  // PAGINATION
+  // ==========================================
+
+  const totalArticlesPromise = Article.countDocuments(query);
+
+  const totalLiveNewsPromise = LiveNews.countDocuments({
+    status: query.status || "online",
+    live: true,
+  });
+
+  const [totalArticles, totalLiveNews] = await Promise.all([
+    totalArticlesPromise,
+    totalLiveNewsPromise,
+  ]);
+
+  const total = totalArticles + totalLiveNews;
+
+  const paginated = combined.slice(
+    skip,
+    skip + pageSize
+  );
+
+  console.timeEnd("dashboard_query");
+
+  return responseHandler(res, {
+    data: paginated,
+    total,
+    limit: pageSize,
+    page: currentPage,
+    pages: Math.ceil(total / pageSize),
+    hasNext:
+      currentPage < Math.ceil(total / pageSize),
+    hasPrev:
+      currentPage > 1,
+  });
+}
 
     if (queryParams.fixedPosition) {
       sortCriteria = { fixedPosition: 1, createdAt: -1 };
