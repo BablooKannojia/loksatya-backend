@@ -230,47 +230,27 @@ route.route("/dashboard/subCategory").get(DashboardSubCategory);
 route.route("/dashboard/categroyAritcles").get(dashBoardCategoryArticles);
 
 // Main live news CRUD
-// route.route("/live-news",
-//   upload.fields([
-//     { name: "image", maxCount: 1 },
-//     { name: "gallery", maxCount: 15 },
-//   ])
-// ).post(CreateLiveNews);
-
-route.post(
-  "/live-news",
-  upload.any(),
-  CreateLiveNews
+route.post("/live-news",upload.fields([
+    { name: "image", maxCount: 1 },
+  ]),CreateLiveNews
 );
 route.route("/live-news").get(GetAllLiveNews);
 route.route("/live-news/admin").get(GetAllLiveNewsAdmin);
 route.route("/live-news/:slug").get(GetSingleLiveNews);
-route.route(
-  "/live-news/:id",
-  upload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "gallery", maxCount: 15 },
-  ])
-).put(UpdateLiveNews);
 
-route.route("/live-news/:id").delete(DeleteLiveNews);
+route.route("/live-news/:id").put(
+    upload.fields([
+      { name: "image", maxCount: 1 },
+    ]),
+    UpdateLiveNews).delete(DeleteLiveNews);
 
 // Timeline updates (the "1 ghante pahle" entries)
-route.route(
-  "/live-news/:id/update",
-  upload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "images", maxCount: 10 },
-  ])
-).post(AddLiveNewsUpdate);
-route.route(
-  "/live-news/update/:id",
-  upload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "images", maxCount: 10 },
-  ])
-).put(UpdateLiveNewsUpdate);
-route.route("/live-news/update/:id").delete(DeleteLiveNewsUpdate);
-
+route.post("/live-news/:id/update", upload.any(), AddLiveNewsUpdate);
+route
+  .route("/live-news/update/:id").put(
+    upload.fields([
+      { name: "image", maxCount: 1 },
+      { name: "images", maxCount: 10 },
+    ]),UpdateLiveNewsUpdate).delete(DeleteLiveNewsUpdate);
 
 export default route;

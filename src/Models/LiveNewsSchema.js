@@ -15,7 +15,6 @@ const LiveNewsSchema = new mongoose.Schema(
         category: String,
         subCategory: String,
         image: String,            // Main image
-        gallery: [String],        // Multiple images
         reportedBy: String,
         publishBy: String,
         tags: [String],
@@ -27,6 +26,12 @@ const LiveNewsSchema = new mongoose.Schema(
         live: {
             type: Boolean,
             default: true,
+        },
+        // Article ki tarah — homepage slider me dikhane ke liye position 1-4
+        sliderOrder: {
+            type: Number,
+            min: 1,
+            max: 4,
         },
     },
     {

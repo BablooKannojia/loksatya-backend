@@ -20,7 +20,7 @@ const uploadToFirebase = async (file, folder = "live-news") => {
     return await getDownloadURL(storageRef);
 };
 
-const uploadMultipleImages = async (files = [], folder = "live-news/gallery") => {
+const uploadMultipleImages = async (files = [], folder = "live-news/updates") => {
     if (!files.length) return [];
     const images = [];
     for (const file of files) {
@@ -42,87 +42,80 @@ const deleteFirebaseFile = async (url) => {
     }
 };
 
+// Helper: upload.any() se aayi files ko fieldname ke basis pe group karna,
+// kyunki req.files ab array hota hai (upload.fields() jaisa object nahi)
+const groupFilesByField = (files = []) => {
+    const grouped = {};
+    for (const file of files) {
+        if (!grouped[file.fieldname]) grouped[file.fieldname] = [];
+        grouped[file.fieldname].push(file);
+    }
+    return grouped;
+};
+
 // ==================== CREATE MAIN LIVE NEWS ====================
 export const CreateLiveNews = async (req, res) => {
-  try {
-    const {
-      title,
-      slug,
-      description,
-      category,
-      subCategory,
-      reportedBy,
-      publishBy,
-      tags,
-      status = "online",
-      live = true,
-    } = req.body;
+    try {
+        const {
+            title,
+            slug,
+            description,
+            category,
+            subCategory,
+            reportedBy,
+            publishBy,
+            tags,
+            status = "online",
+            live = true,
+        } = req.body;
 
-    const finalSlug = slug?.trim().toLowerCase();
+        const finalSlug = slug?.trim().toLowerCase();
 
-    // Slug duplicate check (sirf slug ho tabhi)
-    if (finalSlug) {
-      const checkSlug = await LiveNews.findOne({ slug: finalSlug });
-
-      if (checkSlug) {
-        return errHandler(res, "Slug already exists", 400);
-      }
-    }
-
-    let image = "";
-    let gallery = [];
-
-    if (req.files?.image?.length > 0) {
-      image = await uploadToFirebase(
-        req.files.image[0],
-        "live-news/main"
-      );
-    }
-
-    if (req.files?.gallery?.length > 0) {
-      gallery = await uploadMultipleImages(
-        req.files.gallery,
-        "live-news/gallery"
-      );
-    }
-
-    let finalTags = [];
-
-    if (tags) {
-      if (Array.isArray(tags)) {
-        finalTags = tags;
-      } else {
-        try {
-          finalTags = JSON.parse(tags);
-        } catch {
-          finalTags = tags
-            .split(",")
-            .map((x) => x.trim())
-            .filter(Boolean);
+        if (finalSlug) {
+            const checkSlug = await LiveNews.findOne({ slug: finalSlug });
+            if (checkSlug) {
+                return errHandler(res, "Slug already exists", 400);
+            }
         }
-      }
+
+        // upload.fields() ki wajah se req.files object hai: { image: [file] }
+        let image = "";
+        if (req.files?.image?.length) {
+            image = await uploadToFirebase(req.files.image[0], "live-news/main");
+        }
+
+        let finalTags = [];
+        if (tags) {
+            if (Array.isArray(tags)) {
+                finalTags = tags;
+            } else {
+                try {
+                    finalTags = JSON.parse(tags);
+                } catch {
+                    finalTags = tags.split(",").map((x) => x.trim()).filter(Boolean);
+                }
+            }
+        }
+
+        const news = await LiveNews.create({
+            title,
+            slug: finalSlug,
+            description,
+            category,
+            subCategory,
+            image,
+            reportedBy,
+            publishBy,
+            tags: finalTags,
+            status,
+            live,
+        });
+
+        return responseHandler(res, news);
+    } catch (err) {
+        console.error(err);
+        return errHandler(res, err.message, 500);
     }
-
-    const news = await LiveNews.create({
-      title,
-      slug: finalSlug,
-      description,
-      category,
-      subCategory,
-      image,
-      gallery,
-      reportedBy,
-      publishBy,
-      tags: finalTags,
-      status,
-      live,
-    });
-
-    return responseHandler(res, news);
-  } catch (err) {
-    console.error(err);
-    return errHandler(res, err.message, 500);
-  }
 };
 
 // ==================== ADD A LIVE UPDATE (timeline entry) ====================
@@ -130,6 +123,9 @@ export const AddLiveNewsUpdate = async (req, res) => {
     try {
         const { title, description, postedBy } = req.body;
 
+        if (!title) {
+            return errHandler(res, "Update title is required", 400);
+        }
         if (!description) {
             return errHandler(res, "Update description is required", 400);
         }
@@ -139,13 +135,16 @@ export const AddLiveNewsUpdate = async (req, res) => {
             return errHandler(res, "Live News not found", 404);
         }
 
+        // upload.any() ki wajah se req.files array hai
+        const filesByField = groupFilesByField(req.files);
+
         let image = "";
         let images = [];
-        if (req.files?.image?.length) {
-            image = await uploadToFirebase(req.files.image[0], "live-news/updates");
+        if (filesByField.image?.length) {
+            image = await uploadToFirebase(filesByField.image[0], "live-news/updates");
         }
-        if (req.files?.images?.length) {
-            images = await uploadMultipleImages(req.files.images, "live-news/updates");
+        if (filesByField.images?.length) {
+            images = await uploadMultipleImages(filesByField.images, "live-news/updates");
         }
 
         const update = await LiveNewsUpdate.create({
@@ -180,14 +179,19 @@ export const GetAllLiveNews = async (req, res) => {
 // ==================== GET SINGLE (public - live blog page) ====================
 export const GetSingleLiveNews = async (req, res) => {
     try {
-        const news = await LiveNews.findOne({
-            slug: req.params.slug.trim().toLowerCase(),
-        });
+        const param = req.params.slug.trim();
+
+        // Agar valid Mongo ObjectId hai to _id se dhundo, warna slug se
+        const isObjectId = /^[0-9a-fA-F]{24}$/.test(param);
+
+        const news = isObjectId
+            ? await LiveNews.findById(param)
+            : await LiveNews.findOne({ slug: param.toLowerCase() });
+
         if (!news) {
             return errHandler(res, "News not found", 404);
         }
 
-        // Latest update sabse upar (jaise Aaj Tak me dikhta hai)
         const updates = await LiveNewsUpdate.find({
             liveNewsId: news._id,
         }).sort({ createdAt: -1 });
@@ -269,6 +273,7 @@ export const UpdateLiveNews = async (req, res) => {
             tags,
             status,
             live,
+            sliderOrder,
         } = req.body;
 
         const finalSlug = slug?.trim().toLowerCase();
@@ -279,18 +284,10 @@ export const UpdateLiveNews = async (req, res) => {
         }
 
         let image = news.image;
-        let gallery = news.gallery || [];
 
         if (req.files?.image?.length) {
             await deleteFirebaseFile(news.image);
             image = await uploadToFirebase(req.files.image[0], "live-news/main");
-        }
-
-        if (req.files?.gallery?.length) {
-            if (news.gallery?.length) {
-                await Promise.all(news.gallery.map((img) => deleteFirebaseFile(img)));
-            }
-            gallery = await uploadMultipleImages(req.files.gallery, "live-news/gallery");
         }
 
         if (finalSlug && finalSlug !== news.slug) {
@@ -323,13 +320,23 @@ export const UpdateLiveNews = async (req, res) => {
         news.category = category || news.category;
         news.subCategory = subCategory || news.subCategory;
         news.image = image;
-        news.gallery = gallery;
         news.reportedBy = reportedBy || news.reportedBy;
         news.publishBy = publishBy || news.publishBy;
         news.tags = finalTags;
 
         if (status !== undefined) news.status = status;
         if (live !== undefined) news.live = live;
+        // ✅ ADD
+        if (sliderOrder !== undefined && sliderOrder !== "") {
+            const order = Number(sliderOrder);
+
+            if (order >= 1 && order <= 4) {
+                news.sliderOrder = order;
+            }
+        } else if (sliderOrder === "") {
+            // position remove karni ho
+            news.sliderOrder = undefined;
+        }
 
         await news.save();
         return responseHandler(res, news);
@@ -384,9 +391,6 @@ export const DeleteLiveNews = async (req, res) => {
         }
 
         await deleteFirebaseFile(news.image);
-        if (news.gallery?.length) {
-            await Promise.all(news.gallery.map((img) => deleteFirebaseFile(img)));
-        }
 
         const updates = await LiveNewsUpdate.find({ liveNewsId: news._id });
         for (const item of updates) {
