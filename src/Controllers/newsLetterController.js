@@ -55,15 +55,56 @@ const sendMail = (email) => {
 // Get subscription
 const getallSubscription = async (req, res) => {
   try {
-    const subscriptions = await Subscription.find();
+    let {
+      page = 1,
+      limit = 10,
+      search = "",
+    } = req.query;
 
-    res.status(201).json({
+    page = Math.max(1, Number(page));
+    limit = Math.min(100, Math.max(1, Number(limit)));
+
+    const skip = (page - 1) * limit;
+
+    const query = {};
+
+    // Optional email search
+    if (search?.trim()) {
+      query.email = {
+        $regex: search.trim(),
+        $options: "i",
+      };
+    }
+
+    // Total count
+    const total = await Subscription.countDocuments(query);
+
+    // Paginated data
+    const subscriptions = await Subscription.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    const totalPages = Math.ceil(total / limit);
+
+    res.status(200).json({
       message: "Subscription get successfully",
-      length: subscriptions.length,
-      subscriptions,
+      data: subscriptions,
+      total,
+      currentPage: page,
+      limit,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
     });
+
   } catch (error) {
-    res.status(500).json({ message: "Failed to create subscription" });
+    console.error("Error getting subscriptions:", error);
+
+    res.status(500).json({
+      message: "Failed to get subscriptions",
+    });
   }
 };
 
