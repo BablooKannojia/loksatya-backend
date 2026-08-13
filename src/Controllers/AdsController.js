@@ -1,85 +1,157 @@
 import { AdsS } from "../Models/AdsSchema.js";
 import { errHandler, responseHandler } from "../helper/response.js";
 
-const Ads = (req, res) => {
-  let body = req.body;
-  let { id } = req.query;
-  let { noOfImpression } = req.body;
-  console.log(typeof body.StartAt, body.EndAt);
+const Ads = async (req, res) => {
+  try {
+    const { id } = req.query;
 
-  let StartAt = new Date(body.StartAt);
-  let EndAt = new Date(body.EndAt);
+    const {
+      StartAt,
+      EndAt,
+      noOfImpression = 0,
+    } = req.body;
 
-  body.noOfImpression = noOfImpression;
-  AdsS.create({ ...body, userId: id, StartAt, EndAt })
-    .then((data) => {
-      responseHandler(res, data);
-    })
-    .catch((err) => {
-      console.log(err);
-      errHandler(res, 5, 403);
+    const startDate = new Date(StartAt);
+    const endDate = new Date(EndAt);
+
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        message: "Invalid StartAt or EndAt",
+      });
+    }
+
+    if (startDate >= endDate) {
+      return res.status(400).json({
+        message: "EndAt must be greater than StartAt",
+      });
+    }
+
+    const ad = await AdsS.create({
+      ...req.body,
+      userId: id,
+      StartAt: startDate,
+      EndAt: endDate,
+      noOfImpression,
     });
-};
 
-const GetAds = (req, res) => {
-  let { side, active } = req.query;
-  let obj = {};
-  if (side) {
-    obj.side = side;
+    return responseHandler(res, ad);
+
+  } catch (err) {
+    console.error("Ads create error:", err);
+    return errHandler(res, 5, 403);
   }
-  let currentDate = Date.now();
-  AdsS.find(obj)
-    .then((data) => {
-      let arr = [];
-      for (let i = 0; i < data.length; i++) {
-        const element = data[i];
-        if (active) {
-          let StartAt = currentDate >= new Date(element.StartAt);
-          let EndAt = currentDate <= new Date(element.EndAt);
-
-          if (StartAt && EndAt) {
-            arr.push(element);
-          }
-        }
-      }
-
-      responseHandler(res, active ? arr : data);
-    })
-    .catch((err) => {
-      console.log(err);
-      errHandler(res, 5, 403);
-    });
 };
 
-async function IncrementNoOfImpression(req, res) {
+const GetAds = async (req, res) => {
+  try {
+    const {
+      side,
+      active,
+      device,
+      page = 1,
+      limit = 10,
+    } = req.query;
+
+    const currentPage = Math.max(Number(page), 1);
+    const pageSize = Math.min(Math.max(Number(limit), 1), 100);
+    const skip = (currentPage - 1) * pageSize;
+
+    const filter = {};
+
+    if (side) {
+      filter.side = side;
+    }
+
+    if (device) {
+      filter.$or = [
+        { device },
+        { device: "both" },
+      ];
+    }
+
+    if (active === "true") {
+      const now = new Date();
+
+      filter.active = true;
+      filter.StartAt = { $lte: now };
+      filter.EndAt = { $gte: now };
+    }
+
+    const [data, total] = await Promise.all([
+      AdsS
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .lean(),
+
+      AdsS.countDocuments(filter),
+    ]);
+
+    const totalPages = Math.ceil(total / pageSize);
+
+    return res.status(200).json({
+      data,
+      total,
+      page: currentPage,
+      limit: pageSize,
+      totalPages,
+      hasNext: currentPage < totalPages,
+      hasPrev: currentPage > 1,
+    });
+
+  } catch (err) {
+    console.error("GetAds Error:", err);
+
+    return res.status(500).json({
+      message: "Failed to fetch advertisements",
+      error: err.message,
+    });
+  }
+};
+
+const IncrementNoOfImpression = async (req, res) => {
   try {
     const { id } = req.query;
 
     if (!id) {
-      return res.status(400).json({ message: "Ad ID is required" });
+      return res.status(400).json({
+        message: "Ad ID is required",
+      });
     }
 
-    // Find the ad by ID
-    const ad = await AdsS.findById(id);
+    const ad = await AdsS.findByIdAndUpdate(
+      id,
+      {
+        $inc: {
+          noOfImpression: 1,
+        },
+      },
+      {
+        new: true,
+        lean: true,
+      }
+    );
 
     if (!ad) {
-      return res.status(404).json({ message: "Ad not found" });
+      return res.status(404).json({
+        message: "Ad not found",
+      });
     }
 
-    // Increment noOfImpressions by 1
-    ad.noOfImpression += 1;
+    return res.status(200).json({
+      message: "Impression incremented successfully",
+      data: ad,
+    });
 
-    // Save the updated ad
-    await ad.save();
-
-    return res
-      .status(200)
-      .json({ message: "Impression incremented successfully" });
   } catch (error) {
-    console.error("Error while incrementing impressions:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    console.error("Increment impression error:", error);
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
   }
-}
+};
 
 const ClickAds = async (req, res) => {
   const { id } = req.body;

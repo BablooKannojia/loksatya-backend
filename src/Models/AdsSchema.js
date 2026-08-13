@@ -1,63 +1,86 @@
 import mongoose from "mongoose";
 
-const AdsSchema = mongoose.Schema(
+const AdsSchema = new mongoose.Schema(
   {
     userId: {
       type: String,
       required: true,
+      index: true,
     },
+
     imgLink: {
       type: String,
       required: true,
     },
+
     noAds: {
       type: Number,
       default: 0,
     },
+
     noOfImpression: {
       type: Number,
       default: 0,
     },
+
     link: {
       type: String,
+      default: "",
     },
+
     slugName: {
       type: String,
       required: true,
+      index: true,
     },
+
+    // IMPORTANT: String ki jagah Date
     StartAt: {
-      type: String,
+      type: Date,
       required: true,
+      index: true,
     },
+
     EndAt: {
-      type: String,
+      type: Date,
       required: true,
+      index: true,
     },
+
     Price: {
-      type: String,
-      required: false,
+      type: Number,
       default: 0,
     },
+
     side: {
       type: String,
-      // required:true
-      enum: ["top", "mid", "bottom","popup"],
+      enum: ["top", "mid", "bottom", "popup"],
+      index: true,
     },
+
     device: {
       type: String,
-      // required:true
-      enum: ["mobile", "laptop","both"],
+      enum: ["mobile", "laptop", "both"],
+      index: true,
     },
+
     active: {
       type: Boolean,
       default: true,
+      index: true,
     },
   },
-
   {
     timestamps: true,
   }
 );
 
+// Dashboard/listing ke liye useful indexes
+AdsSchema.index({ createdAt: -1 });
+AdsSchema.index({ active: 1, StartAt: 1, EndAt: 1 });
+AdsSchema.index({ side: 1, active: 1 });
+AdsSchema.index({ device: 1, active: 1 });
+
 const AdsS = mongoose.model("Ad", AdsSchema);
+
 export { AdsS };
