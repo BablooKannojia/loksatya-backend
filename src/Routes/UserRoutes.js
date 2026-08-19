@@ -44,6 +44,7 @@ import {
   imageUpload,
   setFixedPosition,
   shareUrl,
+  SubCategoryDelete,
 } from "../Controllers/ArticleController.js";
 import { upload } from "../middleware/index.js";
 import {
@@ -191,6 +192,7 @@ route
   .post(ArticleContent)
   .put(ArticleContentSequenceEdit)
   .get(ArticleContentGet);
+route.route("/subcategory/:id").delete(SubCategoryDelete)
 route.route("/delete_content/:id").delete(ArticleContentDelete);
 
 route.route("/ads").get(GetAds).post(Ads);

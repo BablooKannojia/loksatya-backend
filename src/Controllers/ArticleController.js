@@ -1066,6 +1066,24 @@ const ArticleContentDelete = (req, res) => {
       errHandler(res, "Article Content was not Deleted", 403);
     });
 };
+
+const SubCategoryDelete = (req, res) => {
+  const { id } = req.params;
+  SubCategory.findByIdAndDelete(id)
+    .then((data) => {
+      if (!data) {
+        return errHandler(res, "SubCategory not found", 404);
+      }
+      responseHandler(res, {
+        message: "SubCategory Deleted Successfully",
+        data,
+        status: 200,
+      });
+    })
+    .catch(() => {
+      errHandler(res, "SubCategory was not Deleted", 403);
+    });
+};
 // const ArticleContentGet = async (req, res) => {
 //   try {
 //     const { id, adminId, type, page = 1, limit = 50 } = req.query;
@@ -1887,6 +1905,7 @@ export {
   ArticleContent,
   ArticleContentSequenceEdit,
   ArticleContentDelete,
+  SubCategoryDelete,
   ArticleContentGet,
   createSubCategory,
   getSubCategory,
