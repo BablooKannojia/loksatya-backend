@@ -3,7 +3,7 @@ import { Article } from "../Models/ArticleSchema.js";
 import { AdsS } from "../Models/AdsSchema.js";
 import { flashnews } from "../Models/FlashSchema.js";
 import { Story } from "../Models/StoriesSchema.js";
-import { Video } from "../Models/VideoSchema.js";
+import { Video } from "../Models/videoSchema.js";
 import { Photo } from "../Models/photoSchema.js";
 import { Comment } from "../Models/CommentSchema.js";
 import { Live } from "../Models/LiveSchema.js";
@@ -11,6 +11,7 @@ import { Poll } from "../Models/PollSchema.js";
 import { Report } from "../Models/ArticleSchema.js";
 import { Content } from "../Models/ArticleSchema.js";
 import { SubCategory } from "../Models/ArticleSchema.js";
+import { LiveNews } from "../Models/LiveNewsSchema.js";
 
 export const Dashboard = async (req, res) => {
   try {
@@ -57,6 +58,7 @@ export const Dashboard = async (req, res) => {
       comments,
       lives,
       polls,
+      livenews,
       reports,
       categories,
       subCategories,
@@ -179,6 +181,13 @@ export const Dashboard = async (req, res) => {
         Poll.countDocuments(todayFilter),
       ]),
 
+      // LIVE NEWS (separate from LIVE)
+      Promise.all([
+        LiveNews.countDocuments({ status: "online", ...dateFilter }),
+        LiveNews.countDocuments({ status: "offline", ...dateFilter }),
+        LiveNews.countDocuments(todayFilter),
+      ]),
+
       // REPORT
       Promise.all([
         Report.countDocuments(dateFilter),
@@ -238,6 +247,12 @@ export const Dashboard = async (req, res) => {
           activeCount: flash[0],
           inactiveCount: flash[1],
           todayData: flash[2],
+        },
+
+        livenews: {
+          activeCount: livenews[0],
+          inactiveCount: livenews[1],
+          todayData: livenews[2],
         },
 
         stories: {
