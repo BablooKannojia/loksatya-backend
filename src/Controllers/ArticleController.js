@@ -369,6 +369,12 @@ const getArticle = async (req, res) => {
       }
     }
 
+    // ✅ NEW: Slug handling — details page ab id ke bajaye slug se article
+    // dhoondhta hai, taaki URL me ?id= dikhane ki zaroorat na rahe.
+    if (queryParams.slug) {
+      query.slug = queryParams.slug;
+    }
+
     // Simple filters
     if (queryParams.status) query.status = queryParams.status;
     if (queryParams.excludeId) query._id = { $ne: queryParams.excludeId };
