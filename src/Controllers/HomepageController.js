@@ -30,7 +30,7 @@ const CACHE_KEY = "homepage:full";
 const ARTICLE_FIELDS = {
   _id: 1, title: 1, image: 1, slug: 1,
   newsType: 1, status: 1, topic: 1,
-  subCategory: 1, createdAt: 1, priority: 1,
+  subCategory: 1, createdAt: 1, updatedAt: 1, priority: 1,
   slider: 1, fixedPosition: 1, type: 1,
 };
 
@@ -75,7 +75,7 @@ export const getHomepageData = async (req, res) => {
         .sort({ createdAt: -1 }).limit(12).select(ARTICLE_FIELDS).lean(),
 
       Article.find({ status: "online", newsType: "topStories", type: "img", priority: true })
-        .sort({ createdAt: -1 }).limit(10).select(ARTICLE_FIELDS).lean(),
+        .sort({ createdAt: -1 }).limit(10).select(ARTICLE_FIELDS).lean().read('primary'),
 
       Article.find({ status: "online", newsType: "upload", type: "img", priority: true })
         .sort({ createdAt: -1 }).limit(14).select(ARTICLE_FIELDS).lean(),
@@ -165,9 +165,7 @@ export const getHomepageData = async (req, res) => {
       .filter((a) => a.status === "online");
 
     const breakingNews = (val(breakingRes) || []).map(addShareUrl);
-    const topStories = (val(topStoriesRes) || [])
-      .map(addShareUrl)
-      .filter((t) => !sliderArticles.some((s) => s._id === t._id));
+    const topStories = (val(topStoriesRes) || []).map(addShareUrl);
     const latestNews = (val(latestRes) || []).map(addShareUrl);
     const priorityArticles = (val(priorityRes) || []).map(addShareUrl);
     const generalArticles = (val(generalRes) || []).map(addShareUrl);

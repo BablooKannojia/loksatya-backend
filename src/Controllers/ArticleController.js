@@ -13,6 +13,7 @@ import { response } from "express";
 import {translate} from '@vitalets/google-translate-api';
 import { redisClient } from '../Config/redisClient.js';
 import { LiveNews } from "../Models/LiveNewsSchema.js";
+import { invalidateHomepageCache } from "./HomepageController.js";
 
 const queryCache = new Map();
 
@@ -728,7 +729,8 @@ const getArticle = async (req, res) => {
 const DeleteArticle = (req, res) => {
   const { id } = req.query;
   // console.log(id);
-  Article.findByIdAndDelete({ _id: id }).then((data) => {
+  Article.findByIdAndDelete({ _id: id }).then(async (data) => {
+    await invalidateHomepageCache();
     responseHandler(res, data);
   });
 };
@@ -902,7 +904,8 @@ const PostArticle = async (req, res) => {
     createdAt: new Date(),
     updatedAt: new Date()
   })
-    .then((data) => {
+    .then(async (data) => {
+      await invalidateHomepageCache();
       responseHandler(res, data);
     })
     .catch((err) => {
@@ -914,7 +917,8 @@ const approvedArticle = (req, res) => {
   let body = req.body;
 
   Article.findByIdAndUpdate({ _id: id }, body, { new: true })
-    .then((data) => {
+    .then(async (data) => {
+      await invalidateHomepageCache();
       responseHandler(res, {
         data,
       });
@@ -1627,6 +1631,8 @@ const clearFixedPosition = async (req, res) => {
       { new: true }
     );
 
+    await invalidateHomepageCache();
+
     res.status(200).json({ message: `Position ${position} cleared successfully` });
   } catch (error) {
     console.error("Error clearing fixed position:", error);
@@ -1668,6 +1674,7 @@ const setFixedPosition = async (req, res) => {
       return res.status(404).json({ message: "Article not found" });
     }
 
+    await invalidateHomepageCache();
     res.status(200).json(updatedArticle);
   } catch (error) {
     console.error("Error setting fixed position:", error);
@@ -1735,6 +1742,7 @@ const addSliderOrder = async (req, res) => {
     const liveNews = await LiveNews.find({ sliderOrder: { $type: "number" } }).lean();
     const data = [...articles, ...liveNews].sort((a, b) => a.sliderOrder - b.sliderOrder);
 
+    await invalidateHomepageCache();
     return res.json({ success: true, data });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -1856,6 +1864,7 @@ const updateSliderOrder = async (req, res) => {
 
     const data = [...articles, ...liveNews].sort((a, b) => a.sliderOrder - b.sliderOrder);
 
+    await invalidateHomepageCache();
     return res.json({ success: true, data });
   } catch (err) {
     console.log(err);
@@ -1883,6 +1892,7 @@ const removeSlider = async (req, res) => {
       await all[i].save();
     }
 
+    await invalidateHomepageCache();
     return res.json({ success: true, message: "Removed Successfully" });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
