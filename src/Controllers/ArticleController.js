@@ -431,7 +431,8 @@ const getArticle = async (req, res) => {
         query.$and.push({ topic: regex }); // Note: you're mapping category to topic field
       }
       if (queryParams.subCategory) {
-        query.$and.push({ subCategory: regex });
+        const subCategoryRegex = new RegExp(queryParams.subCategory.trim(), "i");
+        query.$and.push({ subCategory: subCategoryRegex });
       }
     } else {
       // Different values - use OR logic as before
