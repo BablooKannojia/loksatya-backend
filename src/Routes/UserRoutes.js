@@ -35,6 +35,7 @@ import {
   dashBoardTopStories,
   dashBoardUpload,
   getArticle,
+  getSubCategoryFeed,
   getFixedPositionArticles,
   getSliderArticles,
   updateSliderOrder,
@@ -153,6 +154,8 @@ route.route("/article/add-slider").put(addSliderOrder);
 route.route("/article/remove-slider").put(removeSlider);
 
 route.route("/article").get(getArticle).delete(DeleteArticle);
+route.route("/subcategory-feed").get(getSubCategoryFeed);
+route.route("/category-feed").get(getSubCategoryFeed);
 route.route("/article/:id").put(approvedArticle).post(PostArticle);
 
 route.route("/story").post(createStory);

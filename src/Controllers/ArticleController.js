@@ -727,6 +727,102 @@ const getArticle = async (req, res) => {
   }
 };
 
+// ==================== CATEGORY / SUBCATEGORY FEED (public - Article + LiveNews merged) ====================
+// Category page (/category/खेल) aur Subcategory page (/subcategory/खेल/क्रिकेट)
+// dono ke liye — sirf Article collection se nahi, balki LiveNews collection
+// se bhi matching items nikaal ke, dono ko createdAt ke hisaab se ek hi
+// list mein (newest first) merge karke bhejta hai. subCategory optional hai:
+// agar nahi diya to sirf category se filter hoga (category page ke liye).
+const getSubCategoryFeed = async (req, res) => {
+  try {
+    const { category, subCategory } = req.query;
+
+    if (!category) {
+      return errHandler(res, "category is required", 400);
+    }
+
+    let currentPage = 1;
+    if (req.query.page && !isNaN(parseInt(req.query.page))) {
+      currentPage = Math.max(1, parseInt(req.query.page));
+    }
+    const pageSize = Math.min(parseInt(req.query.limit) || 12, 50);
+    const skip = (currentPage - 1) * pageSize;
+
+    const categoryRegex = new RegExp(category.trim(), "i");
+    const subCategoryRegex = subCategory
+      ? new RegExp(subCategory.trim(), "i")
+      : null;
+
+    // Article collection me category "topic" field me store hoti hai
+    const articleQuery = { topic: categoryRegex };
+    if (subCategoryRegex) articleQuery.subCategory = subCategoryRegex;
+
+    // LiveNews collection me category/subCategory apne naam ke field me hi hain
+    const liveNewsQuery = {
+      category: categoryRegex,
+      status: "online",
+      live: true,
+    };
+    if (subCategoryRegex) liveNewsQuery.subCategory = subCategoryRegex;
+
+    // Merge ke baad correct page slice milے, isliye dono se skip+limit tak
+    // ka data newest-first fetch karte hain (poore collection ko nahi)
+    const fetchLimit = skip + pageSize;
+
+    const [articles, liveNewsItems, totalArticles, totalLiveNews] =
+      await Promise.all([
+        Article.find(articleQuery)
+          .sort({ createdAt: -1 })
+          .limit(fetchLimit)
+          .lean(),
+        LiveNews.find(liveNewsQuery)
+          .sort({ createdAt: -1 })
+          .limit(fetchLimit)
+          .lean(),
+        Article.countDocuments(articleQuery),
+        LiveNews.countDocuments(liveNewsQuery),
+      ]);
+
+    const normalizedArticles = articles.map((item) => ({
+      ...item,
+      contentType: "article",
+      detailUrl: `/details/${item.slug || item._id}`,
+    }));
+
+    const normalizedLiveNews = liveNewsItems.map((item) => ({
+      ...item,
+      contentType: "liveNews",
+      topic: item.category,
+      detailUrl: `/live-news/${item.slug}`,
+    }));
+
+    const combined = [...normalizedArticles, ...normalizedLiveNews].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const paginated = combined.slice(skip, skip + pageSize);
+    const total = totalArticles + totalLiveNews;
+
+    return responseHandler(res, {
+      data: paginated,
+      total,
+      page: currentPage,
+      limit: pageSize,
+      pages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  } catch (error) {
+    console.error("Error in getSubCategoryFeed:", error);
+    return errHandler(
+      res,
+      {
+        message: "Failed to fetch subcategory feed",
+        error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      },
+      500
+    );
+  }
+};
+
 const DeleteArticle = (req, res) => {
   const { id } = req.query;
   // console.log(id);
@@ -1910,6 +2006,7 @@ export {
   removeSlider,
   getSliderArticles,
   getArticle,
+  getSubCategoryFeed,
   adminGetArticle,
   PostArticle,
   approvedArticle,
