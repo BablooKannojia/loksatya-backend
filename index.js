@@ -5,7 +5,7 @@ import color from "colors";
 import morgan from "morgan";
 import cors from "cors";
 import connectDB from "./src/Config/db.js";
-import route from "./src/Routes/UserRoutes.js";
+import route from "./src/Routes/routes.js";
 import startArticleScheduler from "./src/scheduler.js";
 import { shareUrl } from "./src/Controllers/ArticleController.js";
 import path from "path";
