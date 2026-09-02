@@ -33,33 +33,45 @@ const GetComment = async (req, res) => {
 
     const {
       id,
+      postId,
       commentID,
       email,
       name,
       comment
     } = req.query;
 
-    if (id) {
+    // Post ID
+    if (postId) {
+      obj.postId = postId;
+    } else if (id) {
       obj.postId = id;
     }
 
+    // Comment ID
     if (commentID) {
       obj._id = commentID;
     }
 
+    // Email
     if (email) {
       obj.email = new RegExp(email, "i");
     }
 
+    // Name
     if (name) {
       obj.name = new RegExp(name, "i");
     }
 
+    // Comment content
     if (comment) {
       obj.message = new RegExp(comment, "i");
     }
 
-    const data = await Comment.find(obj).sort({ createdAt: -1 });
+    console.log("Comment Query:", obj);
+
+    const data = await Comment
+      .find(obj)
+      .sort({ createdAt: -1 });
 
     return responseHandler(res, data);
 
