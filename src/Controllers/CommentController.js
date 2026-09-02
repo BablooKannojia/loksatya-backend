@@ -27,32 +27,46 @@ const DeleteComment = (req, res) => {
     responseHandler(res, data);
   });
 };
-const GetComment = (req, res) => {
-  let obj = {};
-  let { id , commentID , email , name ,comment} = req.query;
-  if (id) {
-    obj.postId = id
+const GetComment = async (req, res) => {
+  try {
+    let obj = {};
+
+    const {
+      id,
+      commentID,
+      email,
+      name,
+      comment
+    } = req.query;
+
+    if (id) {
+      obj.postId = id;
+    }
+
+    if (commentID) {
+      obj._id = commentID;
+    }
+
+    if (email) {
+      obj.email = new RegExp(email, "i");
+    }
+
+    if (name) {
+      obj.name = new RegExp(name, "i");
+    }
+
+    if (comment) {
+      obj.message = new RegExp(comment, "i");
+    }
+
+    const data = await Comment.find(obj).sort({ createdAt: -1 });
+
+    return responseHandler(res, data);
+
+  } catch (err) {
+    console.error("GetComment Error:", err);
+    return errHandler(res, 5, err);
   }
-  if(commentID){
-    obj._id = commentID
-  }
-  if(email){
-    obj.email = email
-  }
-  if(name){
-    obj.name = name
-  }
-  if(comment){
-    let regex = new RegExp(comment, "i");
-    obj.message = regex;
-  }
-  Comment.find(obj).sort({ createdAt: -1 })
-    .then((data) => {
-      responseHandler(res, data);
-    })
-    .catch(() => {
-      errHandler(res, 5, errHandler);
-    });
 };
 
 const DashBoardComment = async (req,res)=>{
