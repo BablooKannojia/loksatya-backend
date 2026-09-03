@@ -122,12 +122,6 @@ app.get("/health", (req, res) => {
 // ✅ CRITICAL: put shareUrl route BEFORE static serving
 app.get("/details/:slug", shareUrl);
 
-// Serve React build
-app.use(express.static(path.join(__dirname, "dist")));
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
-});
-
 // Error handler
 app.use((err, req, res, next) => {
   console.error(err.stack);
