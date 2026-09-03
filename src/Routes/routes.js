@@ -129,7 +129,7 @@ import {
   UpdateLiveNewsUpdate,
   DeleteLiveNews,
   DeleteLiveNewsUpdate,
-} from "../Controllers/liveNewsController.js";
+} from "../Controllers/LiveNewsController.js";
 
 const route = express.Router();
 
