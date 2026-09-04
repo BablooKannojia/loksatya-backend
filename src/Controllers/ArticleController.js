@@ -521,7 +521,13 @@ const getArticle = async (req, res) => {
   const [normalArticles, normalLiveNews] = await Promise.all([
     Article.find({
       ...query,
-      sliderOrder: { $exists: false },
+      // ✅ FIXED: sliderOrder schema me default:null hai, isliye har naye
+      // article me field "exist" karti hai (value null ke saath) — sirf
+      // $exists:false use karne se naye articles (sliderOrder=null) is
+      // query se bilkul chhoot jaate the aur dashboard list se gayab ho
+      // jaate the. Ab null, missing field, aur 1-4 se bahar ke kisi bhi
+      // value ko "normal" content maana jaayega.
+      sliderOrder: { $not: { $gte: 1, $lte: 4 } },
     })
       .sort({ createdAt: -1 })
       .limit(normalLimit)
@@ -530,7 +536,7 @@ const getArticle = async (req, res) => {
     LiveNews.find({
       status: query.status || "online",
       live: true,
-      sliderOrder: { $exists: false },
+      sliderOrder: { $not: { $gte: 1, $lte: 4 } },
     })
       .sort({ createdAt: -1 })
       .limit(normalLimit)
