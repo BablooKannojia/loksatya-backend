@@ -1,3 +1,4 @@
+
 import { Article, Content, SubCategory } from "../Models/ArticleSchema.js";
 import { AdsS } from "../Models/AdsSchema.js";
 import { flashnews } from "../Models/FlashSchema.js";
@@ -24,8 +25,6 @@ const TTL = {
 };
 
 const CACHE_KEY = "homepage:full";
-const CACHE_KEY_CAT = "homepage:categories";
-const CACHE_KEY_COMMON = "common:navdata";
 
 // ─── Helper: lean article projection — sirf wahi fields jo frontend use karta hai ───
 const ARTICLE_FIELDS = {
@@ -285,11 +284,7 @@ function addShareUrl(article) {
 // ─── Cache invalidate — jab bhi koi article publish ho ───────────────────────
 // Isko ArticleController ke PostArticle/approvedArticle se call karo
 export const invalidateHomepageCache = async () => {
-  await Promise.all([
-    redisClient.del(CACHE_KEY),
-    redisClient.del(CACHE_KEY_CAT),
-    redisClient.del(CACHE_KEY_COMMON),
-  ]);
+  await redisClient.del(CACHE_KEY);
 };
 
 
@@ -297,6 +292,7 @@ export const invalidateHomepageCache = async () => {
 // Pehle: 1 call for categories + N calls for each category = N+1 queries
 // Ab: ek hi endpoint, MongoDB aggregation se sab
 export const getCategoriesWithArticles = async (req, res) => {
+  const CACHE_KEY_CAT = "homepage:categories";
 
   try {
     const cached = await redisClient.get(CACHE_KEY_CAT);
@@ -379,33 +375,32 @@ export const getCategoriesWithArticles = async (req, res) => {
 // GET /api/common
 export const getCommonData = async (req, res) => {
   try {
-    const cached = await redisClient.get(CACHE_KEY_COMMON);
-    if (cached) {
-      res.setHeader("X-Cache", "HIT");
-      res.setHeader("Cache-Control", "public, max-age=120");
-      return res.json(cached);
-    }
-
-    // 1. Categories — ek hi query, dono fields (text + _id) ek saath select
-    //    kar liye taaki neeche menuCategories ke liye dobara same query na
-    //    chalani pade (pehle ye 2 alag Content.find() the).
+    // Categories
     const categories = await Content.find({ type: "category" })
+      .sort({ sequence: 1 })
+      .select("text sequence -_id")
+      .lean();
+
+
+    // menuCategory
+    const menuCategories = await Content.find({ type: "category" })
       .sort({ sequence: 1 })
       .select("_id text sequence")
       .lean();
 
-    const categoryNames = categories.map((c) => c.text);
-
-    // 2. Subcategories — already ek hi query hai, waisa hi rehne diya
+    // menuSubCategory
     const allSubcategories = await SubCategory.find({})
       .select("_id category text")
       .lean();
 
+    const categoryNames = categories.map((c) => c.text);
     const subcategoryMap = {};
+
     allSubcategories.forEach((item) => {
       if (!subcategoryMap[item.category]) {
         subcategoryMap[item.category] = [];
       }
+
       subcategoryMap[item.category].push({
         _id: item._id,
         text: item.text,
@@ -413,81 +408,101 @@ export const getCommonData = async (req, res) => {
       });
     });
 
-    const menu = categories.map((item) => ({
+    const menu = menuCategories.map((item) => ({
       _id: item._id,
       text: item.text,
       sequence: item.sequence,
       subcategories: subcategoryMap[item.text] || [],
     }));
 
-    // 3. Sab categories ke latest 7 articles — pehle har category ke liye
-    //    ALAG Article.find() chal raha tha (N queries, categories jitni
-    //    utni). Ab ek hi aggregation query se sab category ka data ek saath
-    //    aa jaata hai — DB round-trips N se ghat kar 1 ho gaye.
-    const articlesByCategory = await Article.aggregate([
-      {
-        $match: {
-          topic: { $in: categoryNames },
+    // Sab categories ke latest 7 articles ek hi query me
+    const response = await Promise.all(
+      categories.map(async (cat) => {
+        const data = await Article.find({
+          topic: cat.text,
           type: "img",
           priority: true,
           status: "online",
-        },
-      },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: "$topic",
-          articles: {
-            $push: {
-              _id: "$_id",
-              title: "$title",
-              slug: "$slug",
-              image: "$image",
-              topic: "$topic",
-              createdAt: "$createdAt",
-              newsType: "$newsType",
-              status: "$status",
-              priority: "$priority",
-              type: "$type",
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          _id: 0,
-          category: "$_id",
-          data: { $slice: ["$articles", 7] },
-        },
-      },
-    ]);
+        })
+          .sort({ createdAt: -1 })
+          .limit(7)
+          .select("_id title slug image topic createdAt newsType status priority type")
+          .lean();
 
-    const articleMap = {};
-    articlesByCategory.forEach((item) => {
-      articleMap[item.category] = item.data.map((article) => ({
-        ...article,
-        shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
-      }));
-    });
+        return {
+          category: cat.text,
+          sequence: cat.sequence,
+          data: data.map((article) => ({
+            ...article,
+            shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+          })),
+        };
+      })
+    );
+    // const articles = await Article.aggregate([
+    //   {
+    //     $match: {
+    //       topic: { $in: categoryNames },
+    //       type: "img",
+    //       priority: true,
+    //       status: "online",
+    //     },
+    //   },
+    //   {
+    //     $sort: {
+    //       createdAt: -1,
+    //     },
+    //   },
+    //   {
+    //     $group: {
+    //       _id: "$topic",
+    //       articles: {
+    //         $push: {
+    //           _id: "$_id",
+    //           title: "$title",
+    //           slug: "$slug",
+    //           image: "$image",
+    //           topic: "$topic",
+    //           createdAt: "$createdAt",
+    //           newsType: "$newsType",
+    //           status: "$status",
+    //           priority: "$priority",
+    //           type: "$type",
+    //         },
+    //       },
+    //     },
+    //   },
+    //   {
+    //     $project: {
+    //       _id: 0,
+    //       category: "$_id",
+    //       data: {
+    //         $slice: ["$articles", 7],
+    //       },
+    //     },
+    //   },
+    // ]).allowDiskUse(true);
 
-    const response = categories.map((cat) => ({
-      category: cat.text,
-      sequence: cat.sequence,
-      data: articleMap[cat.text] || [],
-    }));
+    // const articleMap = {};
+    // articles.forEach((item) => {
+    //   articleMap[item.category] = item.data.map((article) => ({
+    //     ...article,
+    //     shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+    //   }));
+    // });
 
-    const result = {
+    // const response = categories.map((cat) => ({
+    //   category: cat.text,
+    //   sequence: cat.sequence,
+    //   data: articleMap[cat.text] || [],
+    // }));
+
+
+    return res.json({
       success: true,
       categories: response,
       menu,
-    };
-
-    // 4. Cache me daal do — categories/menu bahut kam badalte hain, isliye
-    //    lambi TTL (15 min, waisi hi jaisi getCategoriesWithArticles use
-    //    karta hai) rakh sakte hain.
-    await redisClient.set(CACHE_KEY_COMMON, result, TTL.CATEGORIES);
-
-    return res.json(result);
+    });
   } catch (error) {
     console.error("getCommonData Error:", error);
     console.error(error.stack);
