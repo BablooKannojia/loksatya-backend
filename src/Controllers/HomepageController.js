@@ -1,4 +1,3 @@
-
 import { Article, Content, SubCategory } from "../Models/ArticleSchema.js";
 import { AdsS } from "../Models/AdsSchema.js";
 import { flashnews } from "../Models/FlashSchema.js";
@@ -25,6 +24,8 @@ const TTL = {
 };
 
 const CACHE_KEY = "homepage:full";
+const CACHE_KEY_CAT = "homepage:categories";
+const CACHE_KEY_COMMON = "common:navdata";
 
 // ─── Helper: lean article projection — sirf wahi fields jo frontend use karta hai ───
 const ARTICLE_FIELDS = {
@@ -257,8 +258,12 @@ export const getHomepageData = async (req, res) => {
       },
     };
 
-    // ─── Cache karo ───
-    await redisClient.set(CACHE_KEY, response, TTL.HOMEPAGE_FULL);
+    // ─── Cache karo (Redis down ho to bhi response block na ho) ───
+    try {
+      await redisClient.set(CACHE_KEY, response, TTL.HOMEPAGE_FULL);
+    } catch (cacheErr) {
+      console.error("getHomepageData cache set failed (ignored):", cacheErr.message);
+    }
 
     res.setHeader("X-Cache", "MISS");
     res.setHeader("Cache-Control", "public, max-age=60");
@@ -284,7 +289,15 @@ function addShareUrl(article) {
 // ─── Cache invalidate — jab bhi koi article publish ho ───────────────────────
 // Isko ArticleController ke PostArticle/approvedArticle se call karo
 export const invalidateHomepageCache = async () => {
-  await redisClient.del(CACHE_KEY);
+  try {
+    await Promise.all([
+      redisClient.del(CACHE_KEY),
+      redisClient.del(CACHE_KEY_CAT),
+      redisClient.del(CACHE_KEY_COMMON),
+    ]);
+  } catch (err) {
+    console.error("invalidateHomepageCache failed (ignored):", err.message);
+  }
 };
 
 
@@ -292,7 +305,6 @@ export const invalidateHomepageCache = async () => {
 // Pehle: 1 call for categories + N calls for each category = N+1 queries
 // Ab: ek hi endpoint, MongoDB aggregation se sab
 export const getCategoriesWithArticles = async (req, res) => {
-  const CACHE_KEY_CAT = "homepage:categories";
 
   try {
     const cached = await redisClient.get(CACHE_KEY_CAT);
@@ -310,47 +322,41 @@ export const getCategoriesWithArticles = async (req, res) => {
       return res.json([]);
     }
 
-    // 2. Sab categories ke liye articles ek MongoDB call mein
+    // 2. Sab categories ke liye articles — pehle yahan MongoDB
+    //    aggregation ($group + $push) use ho raha tha, jo Atlas Free/Flex
+    //    tier par CRASH ho jaata hai, kyunki us tier par allowDiskUse
+    //    parameter ko MongoDB literally IGNORE kar deta hai (official
+    //    Atlas docs: "Free clusters and Flex clusters... Ignore the
+    //    allowDiskUse parameter"). Matlab $group jitna bhi data $push
+    //    karega wahi 100MB RAM limit se crash hota rahega, allowDiskUse
+    //    daalne se koi farak nahi padta.
+    //
+    //    Fix: har category ke liye bounded query (.limit(7)) — ye kabhi
+    //    bhi 100MB memory limit cross nahi karti kyunki result set hamesha
+    //    chhota/bounded rehta hai, aur har MongoDB tier par kaam karta hai.
+    //    Ye queries Promise.all se parallel chalti hain, aur result 15 min
+    //    ke liye cache hota hai — isliye N queries sirf cache-miss par
+    //    chalengi, har request par nahi.
     const categoryNames = categories.map((c) => c.text);
 
-    const articlesByCategory = await Article.aggregate([
-      {
-        $match: {
+    const perCategoryResults = await Promise.all(
+      categoryNames.map((catName) =>
+        Article.find({
           status: "online",
           type: "img",
           priority: true,
-          topic: { $in: categoryNames },
-        },
-      },
-      { $sort: { createdAt: -1 } },
-      {
-        $group: {
-          _id: "$topic",
-          articles: {
-            $push: {
-              _id: "$_id",
-              title: "$title",
-              image: "$image",
-              slug: "$slug",
-              newsType: "$newsType",
-              topic: "$topic",
-              createdAt: "$createdAt",
-            },
-          },
-        },
-      },
-      {
-        $project: {
-          category: "$_id",
-          imgData: { $slice: ["$articles", 7] }, // max 7 per category
-        },
-      },
-    ]);
+          topic: catName,
+        })
+          .sort({ createdAt: -1 })
+          .limit(7)
+          .select("_id title image slug newsType topic createdAt")
+          .lean()
+      )
+    );
 
-    // 3. Category sequence ke hisaab se sort karo
     const categoryMap = {};
-    articlesByCategory.forEach((item) => {
-      categoryMap[item.category] = item.imgData;
+    categoryNames.forEach((catName, idx) => {
+      categoryMap[catName] = perCategoryResults[idx];
     });
 
     const result = categories
@@ -360,7 +366,11 @@ export const getCategoriesWithArticles = async (req, res) => {
       }))
       .filter((c) => c.imgData.length > 0);
 
-    await redisClient.set(CACHE_KEY_CAT, result, TTL.CATEGORIES);
+    try {
+      await redisClient.set(CACHE_KEY_CAT, result, TTL.CATEGORIES);
+    } catch (cacheErr) {
+      console.error("getCategoriesWithArticles cache set failed (ignored):", cacheErr.message);
+    }
 
     res.setHeader("X-Cache", "MISS");
     res.setHeader("Cache-Control", "public, max-age=900");
@@ -375,32 +385,33 @@ export const getCategoriesWithArticles = async (req, res) => {
 // GET /api/common
 export const getCommonData = async (req, res) => {
   try {
-    // Categories
+    const cached = await redisClient.get(CACHE_KEY_COMMON);
+    if (cached) {
+      res.setHeader("X-Cache", "HIT");
+      res.setHeader("Cache-Control", "public, max-age=120");
+      return res.json(cached);
+    }
+
+    // 1. Categories — ek hi query, dono fields (text + _id) ek saath select
+    //    kar liye taaki neeche menuCategories ke liye dobara same query na
+    //    chalani pade (pehle ye 2 alag Content.find() the).
     const categories = await Content.find({ type: "category" })
-      .sort({ sequence: 1 })
-      .select("text sequence -_id")
-      .lean();
-
-
-    // menuCategory
-    const menuCategories = await Content.find({ type: "category" })
       .sort({ sequence: 1 })
       .select("_id text sequence")
       .lean();
 
-    // menuSubCategory
+    const categoryNames = categories.map((c) => c.text);
+
+    // 2. Subcategories — already ek hi query hai, waisa hi rehne diya
     const allSubcategories = await SubCategory.find({})
       .select("_id category text")
       .lean();
 
-    const categoryNames = categories.map((c) => c.text);
     const subcategoryMap = {};
-
     allSubcategories.forEach((item) => {
       if (!subcategoryMap[item.category]) {
         subcategoryMap[item.category] = [];
       }
-
       subcategoryMap[item.category].push({
         _id: item._id,
         text: item.text,
@@ -408,18 +419,33 @@ export const getCommonData = async (req, res) => {
       });
     });
 
-    const menu = menuCategories.map((item) => ({
+    const menu = categories.map((item) => ({
       _id: item._id,
       text: item.text,
       sequence: item.sequence,
       subcategories: subcategoryMap[item.text] || [],
     }));
 
-    // Sab categories ke latest 7 articles ek hi query me
-    const response = await Promise.all(
-      categories.map(async (cat) => {
-        const data = await Article.find({
-          topic: cat.text,
+    // 3. Sab categories ke latest 7 articles — pehle ek MongoDB aggregation
+    //    ($group + $push) se ek hi call me sab category ka data laane ki
+    //    koshish ki gayi thi. Lekin ye Atlas Free/Flex tier par CRASH ho
+    //    jaata hai kyunki us tier par allowDiskUse parameter ko MongoDB
+    //    literally IGNORE kar deta hai (official Atlas docs: "Free
+    //    clusters and Flex clusters... Ignore the allowDiskUse
+    //    parameter"). Matlab $group jitna bhi data $push karega wahi
+    //    100MB RAM limit se crash hota rahega, allowDiskUse daalne se
+    //    koi farak nahi padta us tier par.
+    //
+    //    Fix: har category ke liye bounded query (.limit(7)) — ye kabhi
+    //    bhi 100MB memory limit cross nahi karti kyunki result set hamesha
+    //    chhota/bounded rehta hai, aur har MongoDB tier (Free/Flex/paid)
+    //    par kaam karta hai. Ye N queries Promise.all se parallel chalti
+    //    hain, aur poora result 15 min ke liye cache hota hai — isliye
+    //    ye sirf cache-miss par chalengi, har request par nahi.
+    const perCategoryResults = await Promise.all(
+      categoryNames.map((catName) =>
+        Article.find({
+          topic: catName,
           type: "img",
           priority: true,
           status: "online",
@@ -427,89 +453,565 @@ export const getCommonData = async (req, res) => {
           .sort({ createdAt: -1 })
           .limit(7)
           .select("_id title slug image topic createdAt newsType status priority type")
-          .lean();
-
-        return {
-          category: cat.text,
-          sequence: cat.sequence,
-          data: data.map((article) => ({
-            ...article,
-            shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
-          })),
-        };
-      })
+          .lean()
+      )
     );
-    // const articles = await Article.aggregate([
-    //   {
-    //     $match: {
-    //       topic: { $in: categoryNames },
-    //       type: "img",
-    //       priority: true,
-    //       status: "online",
-    //     },
-    //   },
-    //   {
-    //     $sort: {
-    //       createdAt: -1,
-    //     },
-    //   },
-    //   {
-    //     $group: {
-    //       _id: "$topic",
-    //       articles: {
-    //         $push: {
-    //           _id: "$_id",
-    //           title: "$title",
-    //           slug: "$slug",
-    //           image: "$image",
-    //           topic: "$topic",
-    //           createdAt: "$createdAt",
-    //           newsType: "$newsType",
-    //           status: "$status",
-    //           priority: "$priority",
-    //           type: "$type",
-    //         },
-    //       },
-    //     },
-    //   },
-    //   {
-    //     $project: {
-    //       _id: 0,
-    //       category: "$_id",
-    //       data: {
-    //         $slice: ["$articles", 7],
-    //       },
-    //     },
-    //   },
-    // ]).allowDiskUse(true);
 
-    // const articleMap = {};
-    // articles.forEach((item) => {
-    //   articleMap[item.category] = item.data.map((article) => ({
-    //     ...article,
-    //     shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
-    //   }));
-    // });
+    const articleMap = {};
+    categoryNames.forEach((catName, idx) => {
+      articleMap[catName] = perCategoryResults[idx].map((article) => ({
+        ...article,
+        shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+      }));
+    });
 
-    // const response = categories.map((cat) => ({
-    //   category: cat.text,
-    //   sequence: cat.sequence,
-    //   data: articleMap[cat.text] || [],
-    // }));
+    const response = categories.map((cat) => ({
+      category: cat.text,
+      sequence: cat.sequence,
+      data: articleMap[cat.text] || [],
+    }));
 
-
-    return res.json({
+    const result = {
       success: true,
       categories: response,
       menu,
-    });
+    };
+
+    // 4. Cache me daal do — categories/menu bahut kam badalte hain, isliye
+    //    lambi TTL (15 min, waisi hi jaisi getCategoriesWithArticles use
+    //    karta hai) rakh sakte hain. Agar Redis down hai to set() fail ho
+    //    sakta hai — usko response bhejne se rokna nahi chahiye, isliye
+    //    alag try/catch me daala taaki cache-fail se poora API na toote.
+    try {
+      await redisClient.set(CACHE_KEY_COMMON, result, TTL.CATEGORIES);
+    } catch (cacheErr) {
+      console.error("getCommonData cache set failed (ignored):", cacheErr.message);
+    }
+
+    return res.json(result);
   } catch (error) {
     console.error("getCommonData Error:", error);
     console.error(error.stack);
-     console.log(error.message);
+    console.log(error.message);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch common data",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
+
+// import { Article, Content, SubCategory } from "../Models/ArticleSchema.js";
+// import { AdsS } from "../Models/AdsSchema.js";
+// import { flashnews } from "../Models/FlashSchema.js";
+// import { Video } from "../Models/videoSchema.js";
+// import { Photo } from "../Models/photoSchema.js";
+// import { Poll } from "../Models/PollSchema.js";
+// import { Story } from "../Models/StoriesSchema.js";
+// import { redisClient } from "../Config/redisClient.js";
+
+// // Cache TTL — kitni der tak purana data serve karte rahein
+// const TTL = {
+//   FLASH_NEWS: 60,   // 1 min  — ticker mein dikhta hai, fresh rehna chahiye
+//   BREAKING: 90,   // 1.5 min
+//   TOP_STORIES: 120,  // 2 min
+//   SLIDER: 180,  // 3 min
+//   LATEST: 180,  // 3 min
+//   VIDEOS: 300,  // 5 min
+//   PHOTOS: 300,  // 5 min
+//   STORIES: 300,  // 5 min
+//   POLLS: 300,  // 5 min
+//   ADS: 600,  // 10 min — ads rarely change
+//   CATEGORIES: 900,  // 15 min — category list stable rehti hai
+//   HOMEPAGE_FULL: 60,   // Full homepage cache — 1 min
+// };
+
+// const CACHE_KEY = "homepage:full";
+
+// // ─── Helper: lean article projection — sirf wahi fields jo frontend use karta hai ───
+// const ARTICLE_FIELDS = {
+//   _id: 1, title: 1, image: 1, slug: 1,
+//   newsType: 1, status: 1, topic: 1,
+//   subCategory: 1, createdAt: 1, updatedAt: 1, priority: 1,
+//   slider: 1, fixedPosition: 1, type: 1,
+// };
+
+// // ─── Main Homepage Handler ────────────────────────────────────────────────────
+// export const getHomepageData = async (req, res) => {
+//   try {
+//     // 1. Cache check — agar 60 sec ke andar koi aa chuka hai toh wahi data wapis karo
+//     const cached = await redisClient.get(CACHE_KEY);
+//     if (cached) {
+//       res.setHeader("X-Cache", "HIT");
+//       res.setHeader("Cache-Control", "public, max-age=60");
+//       return res.json(cached);
+//     }
+
+//     // 2. Sab queries ek saath chalao — MongoDB ko parallel hit karo
+//     const [
+//       sliderRes,
+//       breakingRes,
+//       topStoriesRes,
+//       latestRes,
+//       priorityRes,
+//       generalRes,
+//       fixed1Res,
+//       fixed2Res,
+//       flashRes,
+//       videoRes,
+//       photoRes,
+//       storyRes,
+//       pollRes,
+//       adsTopRes,
+//       adsMidRes,
+//       adsBottomRes,
+//       articleTopRes,
+//       // categoryRes,
+//       // categoryArticleRes,
+//     ] = await Promise.allSettled([
+//       // Articles — 8 article queries
+//       Article.find({ status: "online", slider: true, type: "img" })
+//         .sort({ createdAt: -1 }).limit(8).select(ARTICLE_FIELDS).lean(),
+
+//       Article.find({ status: "online", newsType: "breakingNews", type: "img", priority: true })
+//         .sort({ createdAt: -1 }).limit(12).select(ARTICLE_FIELDS).lean(),
+
+//       Article.find({ status: "online", newsType: "topStories", type: "img", priority: true })
+//         .sort({ createdAt: -1 }).limit(10).select(ARTICLE_FIELDS).lean().read('primary'),
+
+//       Article.find({ status: "online", newsType: "upload", type: "img", priority: true })
+//         .sort({ createdAt: -1 }).limit(14).select(ARTICLE_FIELDS).lean(),
+
+//       Article.find({ status: "online", priority: true })
+//         .sort({ createdAt: -1 }).limit(5).select(ARTICLE_FIELDS).lean(),
+
+//       Article.find({ type: "img" })
+//         .sort({ createdAt: -1 }).limit(6).select(ARTICLE_FIELDS).lean(),
+
+//       Article.find({ fixedPosition: 1, status: "online" })
+//         .sort({ fixedPosition: 1, createdAt: -1 }).limit(1).select(ARTICLE_FIELDS).lean(),
+
+//       Article.find({ fixedPosition: 2, status: "online" })
+//         .sort({ fixedPosition: 1, createdAt: -1 }).limit(1).select(ARTICLE_FIELDS).lean(),
+
+//       // Flash news
+//       flashnews.find({}).sort({ createdAt: -1 }).limit(20).lean(),
+
+//       // Videos
+//       Video.find({}).sort({ createdAt: -1 }).limit(6).lean(),
+
+//       // Photos
+//       Photo.find({}).sort({ createdAt: -1 }).limit(12).lean(),
+
+//       // Stories
+//       Story.find({}).sort({ createdAt: -1 }).limit(10).lean(),
+
+//       // Polls
+//       Poll.find({}).sort({ createdAt: -1 }).limit(5).lean(),
+
+//       // Ads — 3 queries
+//       AdsS.find({ active: true, side: "top" }).sort({ createdAt: -1 }).lean(),
+//       AdsS.find({ active: true, side: "mid" }).sort({ createdAt: -1 }).lean(),
+//       AdsS.find({ active: true, side: "bottom" }).sort({ createdAt: -1 }).lean(),
+
+//       // Hardcoded article ID (aapke code mein tha)
+//       Article.findById("6524337309c3cf5a3cca172a").select(ARTICLE_FIELDS).lean(),
+
+//       // Content.find({ type: "category" })
+//       //   .sort({ sequence: 1 })
+//       //   .lean(),
+
+//       // Article.aggregate([
+//       //   {
+//       //     $match: {
+//       //       status: "online",
+//       //       type: "img",
+//       //       priority: true,
+//       //     },
+//       //   },
+//       //   {
+//       //     $sort: {
+//       //       createdAt: -1,
+//       //     },
+//       //   },
+//       //   {
+//       //     $group: {
+//       //       _id: "$topic",
+//       //       articles: {
+//       //         $push: {
+//       //           _id: "$_id",
+//       //           title: "$title",
+//       //           image: "$image",
+//       //           slug: "$slug",
+//       //           topic: "$topic",
+//       //           createdAt: "$createdAt",
+//       //         },
+//       //       },
+//       //     },
+//       //   },
+//       // ]),
+
+//     ]);
+
+
+
+//     // ─── Helper: settled value ya null ───
+//     const val = (r) => {
+//       if (!r) return null;
+//       return r.status === "fulfilled" ? r.value : null;
+//     };
+
+//     // ─── Process articles ───
+//     const sliderArticles = (val(sliderRes) || [])
+//       .map(addShareUrl)
+//       .filter((a) => a.status === "online");
+
+//     const breakingNews = (val(breakingRes) || []).map(addShareUrl);
+//     const topStories = (val(topStoriesRes) || []).map(addShareUrl);
+//     const latestNews = (val(latestRes) || []).map(addShareUrl);
+//     const priorityArticles = (val(priorityRes) || []).map(addShareUrl);
+//     const generalArticles = (val(generalRes) || []).map(addShareUrl);
+
+//     const fixed1 = val(fixed1Res)?.[0] || null;
+//     const fixed2 = val(fixed2Res)?.[0] || null;
+
+//     // ─── Process flash news ───
+//     const flashNewsRaw = val(flashRes) || [];
+//     const flashNews = flashNewsRaw.filter((f) => f.status === "active");
+
+//     // ─── Process videos ───
+//     const videos = (val(videoRes) || []).filter((v) => v.status === true);
+
+//     // ─── Process photos ───
+//     const photos = (val(photoRes) || [])
+//       .filter((p) => p.status === true)
+//       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+//     // ─── Process stories ───
+//     const stories = (val(storyRes) || []).filter((s) => s.status === true);
+
+//     // ─── Process polls ───
+//     const polls = val(pollRes) || [];
+//     const latestPoll = polls.length ? polls[polls.length - 1] : null;
+
+//     // ─── Process ads — last active ad for each position ───
+//     const pickLastActive = (ads) =>
+//       (ads || []).filter((a) => a.active).at(-1) || null;
+
+//     const ads = {
+//       top: pickLastActive(val(adsTopRes)),
+//       mid: pickLastActive(val(adsMidRes)),
+//       bottom: pickLastActive(val(adsBottomRes)),
+//     };
+
+//     // ─── Article top (hardcoded ID) ───
+//     const articleTop = val(articleTopRes) || null;
+
+//     // ─── Mobile slider helpers (same data, different slices) ───
+//     const mobileSlider1 = breakingNews.slice(0, 8);
+//     const mobileSlider2 = sliderArticles;
+
+
+//     // const categories = val(categoryRes) || [];
+//     // const groupedArticles = val(categoryArticleRes) || [];
+
+//     // const articleMap = {};
+
+//     // groupedArticles.forEach(item => {
+//     //   articleMap[item._id] = item.articles.slice(0, 7).map(addShareUrl);
+//     // });
+
+//     // console.log("categories =>", categories);
+//     // console.log("groupedArticles =>", groupedArticles);
+
+//     // const homepageCategories = categories
+//     //   .map(cat => ({
+//     //     category: cat.text,
+//     //     imgData: articleMap[cat.text] || []
+//     //   }))
+//     //   .filter(cat => cat.imgData.length);
+
+//     // ─── Build response ───
+//     const response = {
+//       slider: sliderArticles,
+//       breakingNews,
+//       topStories,
+//       latestNews,
+//       priorityArticles,
+//       generalArticles,
+//       // categories: homepageCategories,
+//       fixedArticles: {
+//         first: fixed1,
+//         second: fixed2,
+//       },
+//       mobileSlider1,
+//       mobileSlider2,
+//       flashNews,
+//       videos,
+//       photos,
+//       stories,
+//       poll: latestPoll,
+//       ads,
+//       articleTop,
+//       _meta: {
+//         generatedAt: new Date().toISOString(),
+//         cached: false,
+//       },
+//     };
+
+//     // ─── Cache karo ───
+//     await redisClient.set(CACHE_KEY, response, TTL.HOMEPAGE_FULL);
+
+//     res.setHeader("X-Cache", "MISS");
+//     res.setHeader("Cache-Control", "public, max-age=60");
+//     return res.json(response);
+
+//   } catch (error) {
+//     console.error("Homepage API Error:", error);
+//     return res.status(500).json({
+//       message: "Homepage data fetch failed",
+//       error: process.env.ENV === "development" ? error.message : undefined,
+//     });
+//   }
+// };
+
+// // ─── Helper: shareUrl add karo ───────────────────────────────────────────────
+// function addShareUrl(article) {
+//   return {
+//     ...article,
+//     shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+//   };
+// }
+
+// // ─── Cache invalidate — jab bhi koi article publish ho ───────────────────────
+// // Isko ArticleController ke PostArticle/approvedArticle se call karo
+// export const invalidateHomepageCache = async () => {
+//   await redisClient.del(CACHE_KEY);
+// };
+
+
+// // ─── Categories with articles — alag endpoint ────────────────────────────────
+// // Pehle: 1 call for categories + N calls for each category = N+1 queries
+// // Ab: ek hi endpoint, MongoDB aggregation se sab
+// export const getCategoriesWithArticles = async (req, res) => {
+//   const CACHE_KEY_CAT = "homepage:categories";
+
+//   try {
+//     const cached = await redisClient.get(CACHE_KEY_CAT);
+//     if (cached) {
+//       res.setHeader("X-Cache", "HIT");
+//       return res.json(cached);
+//     }
+
+//     // 1. Sari categories ek saath lao
+//     const categories = await Content.find({ type: "category" })
+//       .sort({ sequence: 1 })
+//       .lean();
+
+//     if (!categories.length) {
+//       return res.json([]);
+//     }
+
+//     // 2. Sab categories ke liye articles ek MongoDB call mein
+//     const categoryNames = categories.map((c) => c.text);
+
+//     const articlesByCategory = await Article.aggregate([
+//       {
+//         $match: {
+//           status: "online",
+//           type: "img",
+//           priority: true,
+//           topic: { $in: categoryNames },
+//         },
+//       },
+//       { $sort: { createdAt: -1 } },
+//       {
+//         $group: {
+//           _id: "$topic",
+//           articles: {
+//             $push: {
+//               _id: "$_id",
+//               title: "$title",
+//               image: "$image",
+//               slug: "$slug",
+//               newsType: "$newsType",
+//               topic: "$topic",
+//               createdAt: "$createdAt",
+//             },
+//           },
+//         },
+//       },
+//       {
+//         $project: {
+//           category: "$_id",
+//           imgData: { $slice: ["$articles", 7] }, // max 7 per category
+//         },
+//       },
+//     ]);
+
+//     // 3. Category sequence ke hisaab se sort karo
+//     const categoryMap = {};
+//     articlesByCategory.forEach((item) => {
+//       categoryMap[item.category] = item.imgData;
+//     });
+
+//     const result = categories
+//       .map((cat) => ({
+//         category: cat.text,
+//         imgData: categoryMap[cat.text] || [],
+//       }))
+//       .filter((c) => c.imgData.length > 0);
+
+//     await redisClient.set(CACHE_KEY_CAT, result, TTL.CATEGORIES);
+
+//     res.setHeader("X-Cache", "MISS");
+//     res.setHeader("Cache-Control", "public, max-age=900");
+//     return res.json(result);
+
+//   } catch (error) {
+//     console.error("Categories API Error:", error);
+//     return res.status(500).json({ message: "Categories fetch failed" });
+//   }
+// };
+
+// // GET /api/common
+// export const getCommonData = async (req, res) => {
+//   try {
+//     // Categories
+//     const categories = await Content.find({ type: "category" })
+//       .sort({ sequence: 1 })
+//       .select("text sequence -_id")
+//       .lean();
+
+
+//     // menuCategory
+//     const menuCategories = await Content.find({ type: "category" })
+//       .sort({ sequence: 1 })
+//       .select("_id text sequence")
+//       .lean();
+
+//     // menuSubCategory
+//     const allSubcategories = await SubCategory.find({})
+//       .select("_id category text")
+//       .lean();
+
+//     const categoryNames = categories.map((c) => c.text);
+//     const subcategoryMap = {};
+
+//     allSubcategories.forEach((item) => {
+//       if (!subcategoryMap[item.category]) {
+//         subcategoryMap[item.category] = [];
+//       }
+
+//       subcategoryMap[item.category].push({
+//         _id: item._id,
+//         text: item.text,
+//         category: item.category,
+//       });
+//     });
+
+//     const menu = menuCategories.map((item) => ({
+//       _id: item._id,
+//       text: item.text,
+//       sequence: item.sequence,
+//       subcategories: subcategoryMap[item.text] || [],
+//     }));
+
+//     // Sab categories ke latest 7 articles ek hi query me
+//     const response = await Promise.all(
+//       categories.map(async (cat) => {
+//         const data = await Article.find({
+//           topic: cat.text,
+//           type: "img",
+//           priority: true,
+//           status: "online",
+//         })
+//           .sort({ createdAt: -1 })
+//           .limit(7)
+//           .select("_id title slug image topic createdAt newsType status priority type")
+//           .lean();
+
+//         return {
+//           category: cat.text,
+//           sequence: cat.sequence,
+//           data: data.map((article) => ({
+//             ...article,
+//             shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+//           })),
+//         };
+//       })
+//     );
+//     // const articles = await Article.aggregate([
+//     //   {
+//     //     $match: {
+//     //       topic: { $in: categoryNames },
+//     //       type: "img",
+//     //       priority: true,
+//     //       status: "online",
+//     //     },
+//     //   },
+//     //   {
+//     //     $sort: {
+//     //       createdAt: -1,
+//     //     },
+//     //   },
+//     //   {
+//     //     $group: {
+//     //       _id: "$topic",
+//     //       articles: {
+//     //         $push: {
+//     //           _id: "$_id",
+//     //           title: "$title",
+//     //           slug: "$slug",
+//     //           image: "$image",
+//     //           topic: "$topic",
+//     //           createdAt: "$createdAt",
+//     //           newsType: "$newsType",
+//     //           status: "$status",
+//     //           priority: "$priority",
+//     //           type: "$type",
+//     //         },
+//     //       },
+//     //     },
+//     //   },
+//     //   {
+//     //     $project: {
+//     //       _id: 0,
+//     //       category: "$_id",
+//     //       data: {
+//     //         $slice: ["$articles", 7],
+//     //       },
+//     //     },
+//     //   },
+//     // ]).allowDiskUse(true);
+
+//     // const articleMap = {};
+//     // articles.forEach((item) => {
+//     //   articleMap[item.category] = item.data.map((article) => ({
+//     //     ...article,
+//     //     shareUrl: `https://loksatya.com/details/${article.slug || article._id}?id=${article._id}`,
+//     //   }));
+//     // });
+
+//     // const response = categories.map((cat) => ({
+//     //   category: cat.text,
+//     //   sequence: cat.sequence,
+//     //   data: articleMap[cat.text] || [],
+//     // }));
+
+
+//     return res.json({
+//       success: true,
+//       categories: response,
+//       menu,
+//     });
+//   } catch (error) {
+//     console.error("getCommonData Error:", error);
+//     console.error(error.stack);
+//      console.log(error.message);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch common data",
+//     });
+//   }
+// };
